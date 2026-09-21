@@ -41,9 +41,17 @@ def _trim_near_black_borders(image: Image.Image, threshold: int = 12) -> Image.I
     return cropped
 
 
+def _flattened_pixels(image: Image.Image) -> list[int]:
+    # Pillow 11.0 does not have get_flattened_data(); it was added later.
+    get_flattened_data = getattr(image, "get_flattened_data", None)
+    if get_flattened_data is not None:
+        return list(get_flattened_data())
+    return list(image.getdata())
+
+
 def _difference_hash(image: Image.Image, size: int = 8) -> int:
     resized = image.convert("L").resize((size + 1, size), Image.Resampling.LANCZOS)
-    pixels = list(resized.get_flattened_data())
+    pixels = _flattened_pixels(resized)
     result = 0
     for row in range(size):
         offset = row * (size + 1)
@@ -55,7 +63,7 @@ def _difference_hash(image: Image.Image, size: int = 8) -> int:
 
 def _average_hash(image: Image.Image, size: int = 8) -> int:
     resized = image.convert("L").resize((size, size), Image.Resampling.LANCZOS)
-    pixels = list(resized.get_flattened_data())
+    pixels = _flattened_pixels(resized)
     mean = sum(pixels) / len(pixels)
     result = 0
     for value in pixels:

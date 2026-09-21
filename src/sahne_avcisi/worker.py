@@ -90,6 +90,9 @@ class IndexWorker:
         except (AdapterError, OSError, ValueError, subprocess.SubprocessError) as exc:
             self.database.stop_index_job(job["id"], status="failed", error=str(exc))
             return {"job_id": job["id"], "status": "failed", "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - never leave a job stuck in "running"
+            self.database.stop_index_job(job["id"], status="failed", error=f"Beklenmeyen hata: {exc}")
+            return {"job_id": job["id"], "status": "failed", "error": str(exc)}
 
 
 def _redact_url(url: str | None) -> str | None:
@@ -107,10 +110,19 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--interval", type=float, default=2.0)
     parser.add_argument("--max-video-mb", type=int, default=1024)
+    parser.add_argument(
+        "--stale-minutes",
+        type=int,
+        default=60,
+        help="Bu süreden uzun süredir 'running' kalan işleri başlangıçta yeniden kuyruğa al.",
+    )
     args = parser.parse_args()
 
     database = Database(args.database)
     load_seed_sources(database, args.sources)
+    requeued = database.requeue_stale_jobs(args.stale_minutes)
+    if requeued:
+        print(f"{requeued} takılı kalmış iş yeniden kuyruğa alındı.", flush=True)
     worker = IndexWorker(
         database,
         max_video_bytes=max(1, args.max_video_mb) * 1024 * 1024,

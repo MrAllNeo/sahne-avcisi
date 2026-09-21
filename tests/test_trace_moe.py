@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from urllib.error import HTTPError
 
 from sahne_avcisi.trace_moe import TraceMoeClient, TraceMoeError
 
@@ -101,6 +102,38 @@ class TraceMoeTests(unittest.TestCase):
         client = TraceMoeClient(opener=FakeOpener({"frameCount": 0, "error": "bad image", "result": []}))
         with self.assertRaisesRegex(TraceMoeError, "bad image"):
             client.search(b"broken", content_type="image/png", allow_adult=False)
+
+    def test_429_returns_turkish_rate_limit_warning(self) -> None:
+        client = TraceMoeClient(opener=FakeHttpErrorOpener(429))
+        with self.assertRaisesRegex(TraceMoeError, "istek sınırına ulaşıldı"):
+            client.search(b"image", content_type="image/png", allow_adult=False)
+
+    def test_402_returns_distinct_turkish_quota_warning(self) -> None:
+        client = TraceMoeClient(opener=FakeHttpErrorOpener(402))
+        with self.assertRaisesRegex(TraceMoeError, "kotanız doldu"):
+            client.search(b"image", content_type="image/png", allow_adult=False)
+
+    def test_402_and_429_messages_are_distinct(self) -> None:
+        rate_limited = TraceMoeClient(opener=FakeHttpErrorOpener(429))
+        quota_exceeded = TraceMoeClient(opener=FakeHttpErrorOpener(402))
+        with self.assertRaises(TraceMoeError) as rate_limit_ctx:
+            rate_limited.search(b"image", content_type="image/png", allow_adult=False)
+        with self.assertRaises(TraceMoeError) as quota_ctx:
+            quota_exceeded.search(b"image", content_type="image/png", allow_adult=False)
+        self.assertNotEqual(str(rate_limit_ctx.exception), str(quota_ctx.exception))
+
+    def test_503_returns_generic_unavailable_warning(self) -> None:
+        client = TraceMoeClient(opener=FakeHttpErrorOpener(503))
+        with self.assertRaisesRegex(TraceMoeError, "yoğun veya geçici"):
+            client.search(b"image", content_type="image/png", allow_adult=False)
+
+
+class FakeHttpErrorOpener:
+    def __init__(self, code: int):
+        self.code = code
+
+    def open(self, request, timeout: float):  # noqa: ANN001
+        raise HTTPError(request.full_url, self.code, "error", {}, None)
 
 
 if __name__ == "__main__":

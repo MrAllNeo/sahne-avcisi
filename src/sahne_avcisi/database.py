@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from .fingerprint import Fingerprint, similarity
+from .fingerprint import Fingerprint
 
 
 SCHEMA = """
@@ -131,6 +131,8 @@ class Database:
     def __init__(self, path: Path):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._frame_cache: list[dict] | None = None
+        self._frame_cache_count: int | None = None
         with self.connect() as connection:
             connection.executescript(SCHEMA)
             self._migrate_sources(connection)
@@ -148,6 +150,7 @@ class Database:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
         try:
             yield connection
             connection.commit()
@@ -245,27 +248,46 @@ class Database:
             ).fetchone()
             return int(row["id"])
 
-    def add_frame(self, media_id: int, timestamp_ms: int, fingerprint: Fingerprint) -> None:
+    def replace_frames(self, media_id: int, frames: list[tuple[int, Fingerprint]]) -> None:
+        """Replace all frames for a media in one transaction (used on (re)indexing)."""
         with self.connect() as connection:
-            connection.execute(
+            connection.execute("DELETE FROM frames WHERE media_id=?", (media_id,))
+            connection.executemany(
                 """
                 INSERT INTO frames (media_id, timestamp_ms, dhash, ahash, width, height)
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(media_id, timestamp_ms) DO UPDATE SET
-                    dhash=excluded.dhash,
-                    ahash=excluded.ahash,
-                    width=excluded.width,
-                    height=excluded.height
                 """,
-                (
-                    media_id,
-                    timestamp_ms,
-                    fingerprint.dhash,
-                    fingerprint.ahash,
-                    fingerprint.width,
-                    fingerprint.height,
-                ),
+                [
+                    (media_id, timestamp_ms, fingerprint.dhash, fingerprint.ahash, fingerprint.width, fingerprint.height)
+                    for timestamp_ms, fingerprint in frames
+                ],
             )
+        self._frame_cache = None
+        self._frame_cache_count = None
+
+    def _frame_search_cache(self) -> list[dict]:
+        with self.connect() as connection:
+            frame_count = connection.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+            if self._frame_cache is not None and self._frame_cache_count == frame_count:
+                return self._frame_cache
+            rows = connection.execute(
+                """
+                SELECT f.timestamp_ms, f.dhash, f.ahash, m.title, m.episode, m.category,
+                       m.adult, m.source_url, s.name AS source_name
+                FROM frames f
+                JOIN media m ON m.id=f.media_id
+                JOIN sources s ON s.id=m.source_id
+                """
+            ).fetchall()
+            cache = []
+            for row in rows:
+                item = dict(row)
+                item["dhash_int"] = int(item.pop("dhash"), 16)
+                item["ahash_int"] = int(item.pop("ahash"), 16)
+                cache.append(item)
+            self._frame_cache = cache
+            self._frame_cache_count = frame_count
+            return cache
 
     def search(
         self,
@@ -276,31 +298,23 @@ class Database:
         limit: int = 8,
         minimum_similarity: float = 0.55,
     ) -> list[dict]:
-        conditions: list[str] = []
-        params: list[str] = []
-        if not allow_adult:
-            conditions.append("m.adult=0")
-        if category in {"movie-tv", "anime", "adult", "adult-animation"}:
-            conditions.append("m.category=?")
-            params.append(category)
-        where = "WHERE " + " AND ".join(conditions) if conditions else ""
-        query = f"""
-            SELECT f.timestamp_ms, f.dhash, f.ahash, m.title, m.episode, m.category,
-                   m.adult, m.source_url, s.name AS source_name
-            FROM frames f
-            JOIN media m ON m.id=f.media_id
-            JOIN sources s ON s.id=m.source_id
-            {where}
-        """
-        with self.connect() as connection:
-            rows = connection.execute(query, params).fetchall()
+        query_dhash = int(fingerprint.dhash, 16)
+        query_ahash = int(fingerprint.ahash, 16)
+        filter_category = category in {"movie-tv", "anime", "adult", "adult-animation"}
 
         scored = []
-        for row in rows:
-            item = dict(row)
-            raw_similarity = similarity(fingerprint, item.pop("dhash"), item.pop("ahash"))
+        for cached in self._frame_search_cache():
+            if not allow_adult and cached["adult"]:
+                continue
+            if filter_category and cached["category"] != category:
+                continue
+            distance = (query_dhash ^ cached["dhash_int"]).bit_count() + (
+                query_ahash ^ cached["ahash_int"]
+            ).bit_count()
+            raw_similarity = max(0.0, 1.0 - distance / 128.0)
             if raw_similarity < minimum_similarity:
                 continue
+            item = {key: value for key, value in cached.items() if key not in ("dhash_int", "ahash_int")}
             item["similarity"] = round(raw_similarity * 100, 2)
             item["timestamp"] = _format_timestamp(int(item["timestamp_ms"]))
             item["adult"] = bool(item["adult"])
@@ -372,6 +386,21 @@ class Database:
                 "SELECT * FROM index_jobs WHERE source_id=? AND page_url=?", (source_id, page_url)
             ).fetchone()
         return dict(row)
+
+    def requeue_stale_jobs(self, stale_minutes: float) -> int:
+        """Requeue jobs stuck in 'running' longer than stale_minutes (e.g. after a crashed worker)."""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE index_jobs
+                SET status='queued', started_at=NULL, updated_at=CURRENT_TIMESTAMP
+                WHERE status='running'
+                  AND started_at IS NOT NULL
+                  AND started_at <= datetime('now', ?)
+                """,
+                (f"-{max(0, int(stale_minutes))} minutes",),
+            )
+            return cursor.rowcount
 
     def claim_index_job(self) -> dict | None:
         with self.connect() as connection:
