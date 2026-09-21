@@ -24,6 +24,8 @@ flowchart TD
 
 FMHY ve elle tanımlanan kaynaklar tek bir kayıt modeline dönüştürülür. Yeni keşfedilen siteler doğrudan indekslenmez; inceleme kuyruğuna girer.
 
+Her FMHY taraması ayrı bir `catalog_sync_runs` kaydıdır. Bir kaynağın katalog üyeliği `catalog_memberships`, değişiklik geçmişi ise `source_events` içinde tutulur. Böylece alan adı veya açıklaması değişen, geçici olarak kaybolan ve sonradan geri gelen kaynaklar ayırt edilir.
+
 Kaynak durumları:
 
 - `active`: katalog olarak güvenli biçimde kullanılabilir.
@@ -31,6 +33,8 @@ Kaynak durumları:
 - `review-required`: teknik/hukuki/güvenlik incelemesi gerekir.
 - `legal-review`: kullanım hakkı açıklığa kavuşmadan işlenmez.
 - `disabled`: kapalı veya bilinçli olarak devre dışı.
+
+FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi özellikler etiketlenir. İndirme, torrent, canlı TV, durum sayfası ve yardımcı dokümantasyon bağlantıları adaptör kuyruğuna alınmaz.
 
 ### Kaynak adaptörü sözleşmesi
 
@@ -92,4 +96,3 @@ FMHY video kaynağı değil, değişen kaynakları keşfetmek için ana katalogd
 - İndirme/torrent kaynağı → sahne indeksleme dışında tutulur
 
 Bu sayede yüzlerce site tek tek sabit kodlanmak yerine kaynak ve oynatıcı aileleri üzerinden yönetilir.
-

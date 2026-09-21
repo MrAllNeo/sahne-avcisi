@@ -36,12 +36,12 @@ APP = Application()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "SahneAvcisi/0.1"
+    server_version = "SahneAvcisi/0.2"
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.1.0"})
+            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.2.0"})
             return
         if parsed.path == "/api/stats":
             self.send_json(APP.database.stats())
@@ -50,6 +50,22 @@ class RequestHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             include_adult = query.get("adult", ["false"])[0].lower() == "true"
             self.send_json({"items": APP.database.list_sources(include_adult=include_adult)})
+            return
+        if parsed.path in {"/api/catalog/runs", "/api/catalog/events", "/api/adapters/queue"}:
+            if not self.is_admin():
+                self.send_json({"error": "Yönetici anahtarı gerekli."}, HTTPStatus.UNAUTHORIZED)
+                return
+            query = parse_qs(parsed.query)
+            limit = self.parse_limit(query, default=50)
+            if parsed.path == "/api/catalog/runs":
+                self.send_json({"items": APP.database.list_catalog_runs(limit)})
+            elif parsed.path == "/api/catalog/events":
+                self.send_json({"items": APP.database.list_source_events(limit)})
+            else:
+                include_adult = query.get("adult", ["false"])[0].lower() == "true"
+                self.send_json(
+                    {"items": APP.database.list_adapter_queue(include_adult=include_adult, limit=limit)}
+                )
             return
         self.serve_static(parsed.path)
 
@@ -101,6 +117,13 @@ class RequestHandler(BaseHTTPRequestHandler):
     def is_admin(self) -> bool:
         expected = os.environ.get("SAHNE_ADMIN_TOKEN")
         return bool(expected) and self.headers.get("X-Admin-Token") == expected
+
+    @staticmethod
+    def parse_limit(query: dict[str, list[str]], default: int) -> int:
+        try:
+            return max(1, min(int(query.get("limit", [str(default)])[0]), 500))
+        except ValueError:
+            return default
 
     def read_json(self, max_bytes: int, allow_empty: bool = False) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

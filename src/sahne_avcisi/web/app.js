@@ -189,11 +189,37 @@ async function refreshStats(includeAdult = false) {
     document.querySelector("#activeCount").textContent = stats.active_sources.toLocaleString("tr-TR");
     document.querySelector("#mediaCount").textContent = stats.media.toLocaleString("tr-TR");
     document.querySelector("#frameCount").textContent = stats.frames.toLocaleString("tr-TR");
+    renderSyncStats(stats.latest_sync);
     elements.systemState.textContent = "Arama motoru hazır";
     elements.systemState.parentElement.classList.add("ready");
   } catch {
     elements.systemState.textContent = "Motor çevrimdışı";
   }
+}
+
+function renderSyncStats(sync) {
+  const container = document.querySelector(".catalog-status");
+  container.classList.remove("synced", "failed");
+  if (!sync) return;
+
+  container.classList.add(sync.status === "completed" ? "synced" : "failed");
+  document.querySelector("#lastSync").textContent = sync.completed_at
+    ? `${formatDate(sync.completed_at)} · ${sync.status === "completed" ? "Başarılı" : "Hatalı"}`
+    : "Çalışıyor";
+  document.querySelector("#createdSourceCount").textContent = Number(sync.created_count).toLocaleString("tr-TR");
+  document.querySelector("#updatedSourceCount").textContent = Number(sync.updated_count).toLocaleString("tr-TR");
+  document.querySelector("#missingSourceCount").textContent = Number(sync.missing_count).toLocaleString("tr-TR");
+}
+
+function formatDate(sqliteDate) {
+  const parsed = new Date(`${sqliteDate.replace(" ", "T")}Z`);
+  if (Number.isNaN(parsed.getTime())) return sqliteDate;
+  return new Intl.DateTimeFormat("tr-TR", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
 function readAsDataUrl(file) {

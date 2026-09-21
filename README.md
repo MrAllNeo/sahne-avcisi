@@ -4,7 +4,7 @@
 
 Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMHY ana katalog olarak izlenir, keşfedilen siteler inceleme kuyruğuna alınır ve yalnızca teknik, hukuki ve güvenlik kontrollerinden geçen kaynaklar sahne indeksleyicisine bağlanır.
 
-> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. Büyük ölçekli kaynak adaptörleri henüz geliştirilmemiştir.
+> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. FMHY katalog değişikliklerini sürüm sürüm takip eder. Büyük ölçekli video kaynak adaptörleri henüz geliştirilmemiştir.
 
 ## İlk sürümde çalışanlar
 
@@ -15,6 +15,9 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Başlık, bölüm, kaynak ve zaman kodu saklama
 - SQLite üzerinde en yakın kare araması
 - FMHY sayfalarından harici kaynak keşfi
+- FMHY kaynaklarını bölüm, tür, özellik ve önceliğe göre sınıflandırma
+- Yeni, güncellenen, kaybolan ve geri dönen kaynak geçmişi
+- Kaynak adaptörü geliştirme kuyruğu
 - Yönetici anahtarıyla korunan FMHY eşitleme uç noktası
 - Yetişkin kaynaklarını varsayılan olarak gizleme ve 18+ onayı
 - Docker ile çalıştırma
@@ -74,6 +77,14 @@ curl -X POST http://127.0.0.1:8080/api/sources/sync-fmhy \
 
 Keşfedilen kaynaklar otomatik etkinleştirilmez; `review-required` durumunda tutulur.
 
+Sunucuyu açmadan komut satırından çalıştırmak için:
+
+```bash
+sahne-sync-fmhy
+```
+
+Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İndirme, torrent, canlı TV ve yardımcı durum/dokümantasyon bağlantıları sahne adaptörü kuyruğunun dışında tutulur.
+
 ## API
 
 | Yöntem | Yol | Açıklama |
@@ -83,6 +94,9 @@ Keşfedilen kaynaklar otomatik etkinleştirilmez; `review-required` durumunda tu
 | `GET` | `/api/sources?adult=false` | Kaynak kayıtları |
 | `POST` | `/api/search` | Base64 görsel ile sahne araması |
 | `POST` | `/api/sources/sync-fmhy` | Yönetici korumalı FMHY keşfi |
+| `GET` | `/api/catalog/runs` | Yönetici korumalı eşitleme geçmişi |
+| `GET` | `/api/catalog/events` | Yönetici korumalı kaynak değişiklikleri |
+| `GET` | `/api/adapters/queue` | Yönetici korumalı adaptör geliştirme kuyruğu |
 
 ## Yol haritası
 
@@ -112,4 +126,3 @@ Kaynak adaptörü eklemeden önce sitenin kullanım koşullarını, robots polit
 ## Lisans
 
 MIT
-
