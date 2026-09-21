@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .adapters import source_allows_url
 from .database import Database
 from .fingerprint import InvalidImageError, fingerprint_bytes
 from .fmhy import sync_fmhy
@@ -36,12 +37,12 @@ APP = Application()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "SahneAvcisi/0.2"
+    server_version = "SahneAvcisi/0.3"
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.2.0"})
+            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.3.0"})
             return
         if parsed.path == "/api/stats":
             self.send_json(APP.database.stats())
@@ -51,7 +52,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             include_adult = query.get("adult", ["false"])[0].lower() == "true"
             self.send_json({"items": APP.database.list_sources(include_adult=include_adult)})
             return
-        if parsed.path in {"/api/catalog/runs", "/api/catalog/events", "/api/adapters/queue"}:
+        if parsed.path in {
+            "/api/catalog/runs",
+            "/api/catalog/events",
+            "/api/adapters/queue",
+            "/api/index/jobs",
+        }:
             if not self.is_admin():
                 self.send_json({"error": "Yönetici anahtarı gerekli."}, HTTPStatus.UNAUTHORIZED)
                 return
@@ -61,6 +67,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"items": APP.database.list_catalog_runs(limit)})
             elif parsed.path == "/api/catalog/events":
                 self.send_json({"items": APP.database.list_source_events(limit)})
+            elif parsed.path == "/api/index/jobs":
+                self.send_json({"items": APP.database.list_index_jobs(limit)})
             else:
                 include_adult = query.get("adult", ["false"])[0].lower() == "true"
                 self.send_json(
@@ -76,6 +84,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/sources/sync-fmhy":
             self.handle_fmhy_sync()
+            return
+        if parsed.path == "/api/index/jobs":
+            self.handle_index_job()
             return
         self.send_json({"error": "Rota bulunamadı."}, HTTPStatus.NOT_FOUND)
 
@@ -111,6 +122,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             payload = self.read_json(max_bytes=64 * 1024, allow_empty=True)
             feeds = payload.get("feeds") if payload else None
             self.send_json(sync_fmhy(APP.database, feeds))
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def handle_index_job(self) -> None:
+        if not self.is_admin():
+            self.send_json({"error": "Yönetici anahtarı gerekli."}, HTTPStatus.UNAUTHORIZED)
+            return
+        try:
+            payload = self.read_json(max_bytes=32 * 1024)
+            source_id = str(payload.get("source_id", "")).strip()
+            page_url = str(payload.get("page_url", "")).strip()
+            title = str(payload.get("title", "")).strip() or None
+            if not source_id or not page_url or len(page_url) > 2048:
+                raise ValueError("source_id ve geçerli page_url zorunludur.")
+            source = APP.database.get_source(source_id)
+            if source is None:
+                raise ValueError("Kaynak bulunamadı.")
+            if urlparse(page_url).scheme.lower() != "https" or not source_allows_url(source, page_url):
+                raise ValueError("Adres seçilen kaynağın HTTPS alan adına ait olmalı.")
+            job = APP.database.enqueue_index_job(source_id=source_id, page_url=page_url, title=title)
+            self.send_json({"job": job}, HTTPStatus.ACCEPTED)
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
 

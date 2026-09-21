@@ -4,7 +4,7 @@
 
 Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMHY ana katalog olarak izlenir, keşfedilen siteler inceleme kuyruğuna alınır ve yalnızca teknik, hukuki ve güvenlik kontrollerinden geçen kaynaklar sahne indeksleyicisine bağlanır.
 
-> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. FMHY katalog değişikliklerini sürüm sürüm takip eder. Büyük ölçekli video kaynak adaptörleri henüz geliştirilmemiştir.
+> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. FMHY katalog değişikliklerini sürüm sürüm takip eder. Güvenli kaynak kuyruğu ve temel HTML5/doğrudan video adaptörleri çalışır; siteye özel geniş ölçekli adaptörler henüz geliştirilmemiştir.
 
 ## İlk sürümde çalışanlar
 
@@ -18,6 +18,10 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - FMHY kaynaklarını bölüm, tür, özellik ve önceliğe göre sınıflandırma
 - Yeni, güncellenen, kaybolan ve geri dönen kaynak geçmişi
 - Kaynak adaptörü geliştirme kuyruğu
+- HTML5 video, Open Graph video, Video.js, JWPlayer, Plyr, HLS ve iframe oynatıcı tespiti
+- Yalnızca etkinleştirilmiş kaynaklar için kalıcı indeksleme iş kuyruğu
+- Boyut sınırlı geçici video indirme ve bağımsız FFmpeg worker'ı
+- HTTPS, alan adı, yönlendirme ve özel IP/SSRF kontrolleri
 - Yönetici anahtarıyla korunan FMHY eşitleme uç noktası
 - Yetişkin kaynaklarını varsayılan olarak gizleme ve 18+ onayı
 - Docker ile çalıştırma
@@ -85,6 +89,31 @@ sahne-sync-fmhy
 
 Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İndirme, torrent, canlı TV ve yardımcı durum/dokümantasyon bağlantıları sahne adaptörü kuyruğunun dışında tutulur.
 
+## Kaynak URL'sini indeksleme
+
+Bir kaynak ancak teknik/hukuki incelemeden sonra `config/sources.json` içinde `active` yapılabilir. `catalog`, `metadata` ve `api` türleri video işi kabul etmez. Sayfa adresi kaynağın kendi HTTPS alan adına ait olmalıdır.
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/index/jobs \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Token: uzun-rastgele-bir-deger' \
+  -d '{
+    "source_id": "izinli-kaynak",
+    "page_url": "https://video.example.com/watch/42",
+    "title": "İsteğe bağlı başlık"
+  }'
+```
+
+Kuyruğu ayrı bir süreçte çalıştır:
+
+```bash
+sahne-worker
+# Geliştirme veya zamanlanmış görev için yalnızca tek iş:
+sahne-worker --once
+```
+
+Worker doğrudan MP4/WebM/MOV/M4V adreslerini ve HTML sayfasındaki standart video metadatasını çözebilir. HLS veya üçüncü taraf iframe tanınır fakat otomatik işlenmez; içerik sahibinin iznine göre kaynağa özel adaptör gerekir. İndirilen video yalnızca geçici dizinde işlenir ve kare parmak izleri çıkarılınca silinir.
+
 ## API
 
 | Yöntem | Yol | Açıklama |
@@ -97,6 +126,8 @@ Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İnd
 | `GET` | `/api/catalog/runs` | Yönetici korumalı eşitleme geçmişi |
 | `GET` | `/api/catalog/events` | Yönetici korumalı kaynak değişiklikleri |
 | `GET` | `/api/adapters/queue` | Yönetici korumalı adaptör geliştirme kuyruğu |
+| `POST` | `/api/index/jobs` | Yönetici korumalı URL indeksleme işi oluşturma |
+| `GET` | `/api/index/jobs` | Yönetici korumalı indeksleme işleri ve durumları |
 
 ## Yol haritası
 
@@ -105,8 +136,8 @@ Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İnd
 3. Altyazı, filigran ve oynatıcı arayüzü maskeleme
 4. Normal anime için trace.moe adaptörü
 5. JustWatch/TMDB metadata zenginleştirme
-6. İzinli kaynaklar için ortak oynatıcı adaptörleri
-7. FMHY değişiklik takibi ve kaynak sağlık kontrolleri
+6. Açık izinli HLS ve ortak iframe oynatıcı adaptörleri
+7. Kaynak sağlık kontrolleri ve takılı iş kurtarma
 8. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
 
 Detaylı tasarım için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasına bakın.

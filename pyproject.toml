@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sahne-avcisi"
-version = "0.2.0"
+version = "0.3.0"
 description = "FMHY-first screenshot-to-scene search engine"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,7 @@ dependencies = ["Pillow>=11.0"]
 sahne-avcisi = "sahne_avcisi.server:main"
 sahne-index = "sahne_avcisi.indexer:main"
 sahne-sync-fmhy = "sahne_avcisi.catalog_cli:main"
+sahne-worker = "sahne_avcisi.worker:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

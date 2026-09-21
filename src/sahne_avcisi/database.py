@@ -92,6 +92,26 @@ CREATE TABLE IF NOT EXISTS source_events (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS index_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id TEXT NOT NULL REFERENCES sources(id),
+    page_url TEXT NOT NULL,
+    title_override TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    adapter TEXT,
+    player_type TEXT,
+    media_url TEXT,
+    error TEXT,
+    media_id INTEGER REFERENCES media(id),
+    frame_count INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_id, page_url)
+);
+
 CREATE INDEX IF NOT EXISTS idx_catalog_sync_runs_catalog_started
 ON catalog_sync_runs(catalog_id, started_at DESC);
 
@@ -100,6 +120,10 @@ ON catalog_memberships(catalog_id, present);
 
 CREATE INDEX IF NOT EXISTS idx_source_events_created
 ON source_events(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_index_jobs_queued
+ON index_jobs(status, id)
+WHERE status='queued';
 """
 
 
@@ -180,6 +204,16 @@ class Database:
         query += " ORDER BY priority DESC, name COLLATE NOCASE"
         with self.connect() as connection:
             return [dict(row) for row in connection.execute(query, params).fetchall()]
+
+    def get_source(self, source_id: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM sources WHERE id=?", (source_id,)).fetchone()
+        if row is None:
+            return None
+        source = dict(row)
+        source["adult"] = bool(source["adult"])
+        source["tags"] = json.loads(source.pop("tags_json"))
+        return source
 
     def create_media(
         self,
@@ -289,13 +323,142 @@ class Database:
                 LIMIT 1
                 """
             ).fetchone()
+            job_rows = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM index_jobs GROUP BY status"
+            ).fetchall()
         return {
             "sources": source_count,
             "active_sources": active_count,
             "media": media_count,
             "frames": frame_count,
             "latest_sync": dict(latest_sync) if latest_sync else None,
+            "index_jobs": {row["status"]: int(row["count"]) for row in job_rows},
         }
+
+    def enqueue_index_job(self, *, source_id: str, page_url: str, title: str | None = None) -> dict:
+        with self.connect() as connection:
+            source = connection.execute(
+                "SELECT id, status, kind FROM sources WHERE id=?", (source_id,)
+            ).fetchone()
+            if source is None:
+                raise ValueError("Kaynak bulunamadı.")
+            if source["status"] != "active":
+                raise ValueError("Kaynak etkinleştirilmeden indeksleme işi oluşturulamaz.")
+            if source["kind"] in {"catalog", "metadata", "api"}:
+                raise ValueError("Bu kaynak video indeksleme adaptörü değildir.")
+            connection.execute(
+                """
+                INSERT INTO index_jobs (source_id, page_url, title_override)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source_id, page_url) DO UPDATE SET
+                    title_override=COALESCE(excluded.title_override, index_jobs.title_override),
+                    status=CASE
+                        WHEN index_jobs.status IN ('failed', 'blocked') THEN 'queued'
+                        ELSE index_jobs.status
+                    END,
+                    error=CASE
+                        WHEN index_jobs.status IN ('failed', 'blocked') THEN NULL
+                        ELSE index_jobs.error
+                    END,
+                    completed_at=CASE
+                        WHEN index_jobs.status IN ('failed', 'blocked') THEN NULL
+                        ELSE index_jobs.completed_at
+                    END,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (source_id, page_url, title.strip() if title else None),
+            )
+            row = connection.execute(
+                "SELECT * FROM index_jobs WHERE source_id=? AND page_url=?", (source_id, page_url)
+            ).fetchone()
+        return dict(row)
+
+    def claim_index_job(self) -> dict | None:
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM index_jobs WHERE status='queued' ORDER BY id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = connection.execute(
+                """
+                UPDATE index_jobs
+                SET status='running', attempts=attempts+1, started_at=CURRENT_TIMESTAMP,
+                    completed_at=NULL, error=NULL, updated_at=CURRENT_TIMESTAMP
+                WHERE id=? AND status='queued'
+                """,
+                (row["id"],),
+            )
+            if cursor.rowcount != 1:
+                return None
+            claimed = connection.execute("SELECT * FROM index_jobs WHERE id=?", (row["id"],)).fetchone()
+        return dict(claimed)
+
+    def complete_index_job(
+        self,
+        job_id: int,
+        *,
+        adapter: str,
+        player_type: str,
+        media_url: str | None,
+        media_id: int,
+        frame_count: int,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE index_jobs
+                SET status='completed', adapter=?, player_type=?, media_url=?, media_id=?,
+                    frame_count=?, error=NULL, completed_at=CURRENT_TIMESTAMP,
+                    updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+                """,
+                (adapter, player_type, media_url, media_id, frame_count, job_id),
+            )
+
+    def stop_index_job(
+        self,
+        job_id: int,
+        *,
+        status: str,
+        error: str,
+        adapter: str | None = None,
+        player_type: str | None = None,
+        media_url: str | None = None,
+    ) -> None:
+        if status not in {"blocked", "failed"}:
+            raise ValueError("Geçersiz iş durumu.")
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE index_jobs
+                SET status=?, error=?, adapter=COALESCE(?, adapter),
+                    player_type=COALESCE(?, player_type), media_url=COALESCE(?, media_url),
+                    completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+                """,
+                (status, error[:1000], adapter, player_type, media_url, job_id),
+            )
+
+    def list_index_jobs(self, limit: int = 50) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT j.*, s.name AS source_name, s.category, s.adult
+                FROM index_jobs j
+                JOIN sources s ON s.id=j.source_id
+                ORDER BY j.id DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+        jobs = []
+        for row in rows:
+            job = dict(row)
+            job["adult"] = bool(job["adult"])
+            jobs.append(job)
+        return jobs
 
     def start_catalog_sync(self, catalog_id: str, feed_url: str) -> int:
         with self.connect() as connection:

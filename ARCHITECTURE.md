@@ -38,16 +38,36 @@ FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi öze
 
 ### Kaynak adaptörü sözleşmesi
 
-Gelecekteki adaptörler aşağıdaki sınırı korumalıdır:
+`AdapterRegistry`, etkin bir kaynağın kendi alan adındaki sayfayı çözer ve standart oynatıcı işaretlerini ortak bir sonuca dönüştürür:
 
 ```python
-class SourceAdapter:
-    def discover_catalog(self) -> list[MediaRecord]: ...
-    def get_public_preview(self, media: MediaRecord) -> PreviewAsset | None: ...
-    def healthcheck(self) -> SourceHealth: ...
+class AdapterResult:
+    adapter: str
+    page_url: str
+    title: str
+    media_url: str | None
+    player_type: str
+    indexable: bool
 ```
 
-Adaptör DRM, oturum, ödeme duvarı, CAPTCHA veya başka bir erişim kontrolünü aşmamalıdır.
+Genel adaptör doğrudan video, Open Graph video ve HTML5 `video/source` elemanlarını indeksleyebilir. HLS ile iframe oynatıcılar yalnızca tespit edilir ve `blocked` durumuna alınır; otomatik takip edilmez. Adaptör DRM, oturum, ödeme duvarı, CAPTCHA veya başka bir erişim kontrolünü aşmamalıdır.
+
+### İndeksleme işleri
+
+`index_jobs` tablosu URL başına kalıcı görev ve şu yaşam döngüsünü tutar:
+
+```mermaid
+stateDiagram-v2
+    [*] --> queued
+    queued --> running
+    running --> completed
+    running --> blocked
+    running --> failed
+    blocked --> queued: yeniden inceleme
+    failed --> queued: yeniden deneme
+```
+
+API yalnızca yönetici anahtarıyla iş oluşturur. Worker görevi atomik olarak sahiplenir, videoyu boyut sınırlı geçici dosyaya indirir, FFmpeg ile indeksler ve geçici dosyayı siler. Birden fazla worker aynı işi eşzamanlı alamaz.
 
 ### Sahne indeksleme
 

@@ -189,6 +189,10 @@ async function refreshStats(includeAdult = false) {
     document.querySelector("#activeCount").textContent = stats.active_sources.toLocaleString("tr-TR");
     document.querySelector("#mediaCount").textContent = stats.media.toLocaleString("tr-TR");
     document.querySelector("#frameCount").textContent = stats.frames.toLocaleString("tr-TR");
+    const jobs = stats.index_jobs || {};
+    document.querySelector("#indexJobCount").textContent = Number(
+      (jobs.queued || 0) + (jobs.running || 0),
+    ).toLocaleString("tr-TR");
     renderSyncStats(stats.latest_sync);
     elements.systemState.textContent = "Arama motoru hazır";
     elements.systemState.parentElement.classList.add("ready");

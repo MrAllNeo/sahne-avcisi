@@ -644,7 +644,7 @@ h1 span {
 
 .catalog-status {
   display: grid;
-  grid-template-columns: 1.5fr repeat(3, 0.5fr);
+  grid-template-columns: 1.5fr repeat(4, 0.5fr);
   gap: 1px;
   margin-top: 18px;
   overflow: hidden;
@@ -783,7 +783,7 @@ footer {
   }
 
   .catalog-status {
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 
   .catalog-status > div:first-child {
