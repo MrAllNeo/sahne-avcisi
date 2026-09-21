@@ -16,6 +16,8 @@ flowchart TD
     FP --> INDEX[(Sahne indeksi)]
     UPLOAD[Ekran görüntüsü] --> QUERY[Sorgu normalizasyonu]
     QUERY --> INDEX
+    QUERY -->|açık onay| TRACE[trace.moe anime API]
+    TRACE --> RANK
     INDEX --> RANK[Doğrulama ve sıralama]
     RANK --> RESULT[Başlık + zaman kodu + kaynak]
 ```
@@ -90,6 +92,12 @@ Video dosyaları kalıcı olarak saklanmaz. Gerekli minimum parmak izi, zaman ko
 4. Hash ve embedding oluşturulur.
 5. Yetişkin filtresi sorgu sahibinin açık onayına göre uygulanır.
 6. Aday sonuçlar kaynak sağlığı ve benzerlik puanıyla sıralanır.
+
+### trace.moe federasyonu
+
+Anime dış araması varsayılan kapalıdır. `use_trace_moe=true` yalnızca kullanıcı arayüzündeki açık onaydan sonra gönderilir ve `all` veya `anime` kategorilerinde çalışır. Sunucu doğrulanmış görsel baytlarını `POST /search?anilistInfo&cutBorders=2` isteğiyle yollar; isteğe bağlı anahtar `x-trace-key` başlığına eklenir.
+
+Dönen sonuçlar yerel sonuç modeliyle birleştirilir. AniList başlığı, bölüm, zaman kodu ve benzerlik korunur; önizleme adresleri yalnızca `trace.moe` HTTPS alan adları için kabul edilir. `isAdult` sonuçları 18+ onayı yoksa sunucuda elenir. Dış servis hatası yerel aramayı başarısız yapmaz.
 
 ## Ölçekleme planı
 

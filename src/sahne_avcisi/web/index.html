@@ -75,21 +75,33 @@
           </div>
 
           <div class="search-options">
-            <label class="adult-toggle">
-              <input id="adultToggle" type="checkbox" />
-              <span class="toggle-track"><span></span></span>
-              <span>
-                <strong>18+ indeksini dahil et</strong>
-                <small>Yalnızca reşit kullanıcılar</small>
-              </span>
-            </label>
+            <div class="toggle-stack">
+              <label class="adult-toggle">
+                <input id="adultToggle" type="checkbox" />
+                <span class="toggle-track"><span></span></span>
+                <span>
+                  <strong>18+ indeksini dahil et</strong>
+                  <small>Yalnızca reşit kullanıcılar</small>
+                </span>
+              </label>
+              <label class="adult-toggle trace-toggle">
+                <input id="traceToggle" type="checkbox" />
+                <span class="toggle-track"><span></span></span>
+                <span>
+                  <strong>trace.moe anime araması</strong>
+                  <small>Görsel üçüncü taraf API'ye gönderilir</small>
+                </span>
+              </label>
+            </div>
             <button id="searchButton" class="search-button" type="button" disabled>
               <span>Sahneyi ara</span>
               <span aria-hidden="true">↗</span>
             </button>
           </div>
 
-          <p class="privacy-note">Yüklenen görsel yalnızca arama sırasında bellekte işlenir; diske kaydedilmez.</p>
+          <p class="privacy-note" id="privacyNote">
+            Görsel yalnızca bu sunucunun belleğinde işlenir; diske kaydedilmez.
+          </p>
         </div>
       </section>
 

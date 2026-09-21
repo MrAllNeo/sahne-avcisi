@@ -26,3 +26,5 @@ Genel adaptör özel, yerel, loopback, link-local ve ayrılmış IP bloklarını
 ## Gizlilik
 
 Sorgu görselleri varsayılan olarak diske yazılmaz. Üretim ortamında hata logları görsel gövdesi, oturum anahtarı veya kaynak erişim bilgisi içermemelidir.
+
+trace.moe araması açık kullanıcı seçimine bağlıdır ve varsayılan kapalıdır. Seçenek açıldığında görsel üçüncü taraf trace.moe API'sine iletilir. API anahtarı yanıtlara veya loglara eklenmez; yalnızca `x-trace-key` istek başlığında kullanılır. Dış önizleme adresleri yalnızca HTTPS `trace.moe` alan adlarından kabul edilir ve kalıcı olarak saklanmaz.

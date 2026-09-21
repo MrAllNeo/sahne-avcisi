@@ -11,7 +11,7 @@ from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-USER_AGENT = "SahneAvcisi/0.3 (+https://github.com/MrAllNeo/sahne-avcisi)"
+USER_AGENT = "SahneAvcisi/0.4 (+https://github.com/MrAllNeo/sahne-avcisi)"
 DIRECT_VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".webm"}
 HLS_EXTENSIONS = {".m3u8"}
 

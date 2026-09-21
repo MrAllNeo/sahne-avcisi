@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sahne-avcisi"
-version = "0.3.0"
+version = "0.4.0"
 description = "FMHY-first screenshot-to-scene search engine"
 readme = "README.md"
 requires-python = ">=3.11"

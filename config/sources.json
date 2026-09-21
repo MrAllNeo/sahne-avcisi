@@ -28,9 +28,9 @@
     "kind": "api",
     "category": "anime",
     "adult": false,
-    "status": "planned",
+    "status": "active",
     "priority": 90,
-    "notes": "Normal anime sahne araması"
+    "notes": "Kullanıcı onaylı canlı anime sahne araması; isteğe bağlı API anahtarı"
   },
   {
     "id": "hanime",
@@ -165,4 +165,3 @@
     "notes": "Yalnızca hukuken uygun metadata/kaynak kullanımı değerlendirilecek"
   }
 ]
-

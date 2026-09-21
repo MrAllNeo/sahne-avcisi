@@ -15,6 +15,7 @@ from .database import Database
 from .fingerprint import InvalidImageError, fingerprint_bytes
 from .fmhy import sync_fmhy
 from .source_registry import load_seed_sources
+from .trace_moe import TraceMoeClient, TraceMoeError
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -31,18 +32,19 @@ class Application:
         if not source_file.is_file():
             source_file = Path.cwd() / "config" / "sources.json"
         load_seed_sources(self.database, source_file)
+        self.trace_moe = TraceMoeClient(api_key=os.environ.get("TRACE_MOE_API_KEY"))
 
 
 APP = Application()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "SahneAvcisi/0.3"
+    server_version = "SahneAvcisi/0.4"
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.3.0"})
+            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.4.0"})
             return
         if parsed.path == "/api/stats":
             self.send_json(APP.database.stats())
@@ -93,22 +95,50 @@ class RequestHandler(BaseHTTPRequestHandler):
     def handle_search(self) -> None:
         try:
             payload = self.read_json(max_bytes=20 * 1024 * 1024)
-            encoded = payload.get("image_base64", "")
+            encoded = str(payload.get("image_base64", ""))
+            content_type = self.image_content_type(encoded)
             if "," in encoded:
                 encoded = encoded.split(",", 1)[1]
             image_bytes = base64.b64decode(encoded, validate=True)
             fingerprint = fingerprint_bytes(image_bytes)
+            category = str(payload.get("category", "all"))
+            allow_adult = bool(payload.get("allow_adult", False))
+            limit = max(1, min(int(payload.get("limit", 8)), 25))
             results = APP.database.search(
                 fingerprint,
-                allow_adult=bool(payload.get("allow_adult", False)),
-                category=str(payload.get("category", "all")),
-                limit=int(payload.get("limit", 8)),
+                allow_adult=allow_adult,
+                category=category,
+                limit=limit,
             )
+            trace_status = {"requested": False, "searched_frames": 0}
+            external_error = None
+            if payload.get("use_trace_moe") is True and category in {"all", "anime"}:
+                trace_status["requested"] = True
+                try:
+                    trace_result = APP.trace_moe.search(
+                        image_bytes,
+                        content_type=content_type,
+                        allow_adult=allow_adult,
+                        limit=limit,
+                    )
+                    results.extend(trace_result["results"])
+                    trace_status.update(
+                        {
+                            "searched_frames": trace_result["frame_count"],
+                            "quota": trace_result["quota"],
+                            "quota_used": trace_result["quota_used"],
+                        }
+                    )
+                except TraceMoeError as exc:
+                    external_error = str(exc)
+            results.sort(key=lambda item: float(item.get("similarity", 0)), reverse=True)
             self.send_json(
                 {
                     "query": {"width": fingerprint.width, "height": fingerprint.height},
-                    "results": results,
+                    "results": results[:limit],
                     "indexed_frames": APP.database.stats()["frames"],
+                    "providers": {"trace_moe": trace_status},
+                    "external_error": external_error,
                 }
             )
         except (ValueError, InvalidImageError, binascii.Error) as exc:
@@ -156,6 +186,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             return max(1, min(int(query.get("limit", [str(default)])[0]), 500))
         except ValueError:
             return default
+
+    @staticmethod
+    def image_content_type(data_url: str) -> str:
+        if not data_url.startswith("data:") or "," not in data_url:
+            return "application/octet-stream"
+        header = data_url[5:].split(",", 1)[0].lower()
+        media_type = header.split(";", 1)[0]
+        return media_type if media_type in {"image/jpeg", "image/png", "image/webp"} else "application/octet-stream"
 
     def read_json(self, max_bytes: int, allow_empty: bool = False) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

@@ -15,6 +15,9 @@ const elements = {
   fileMeta: document.querySelector("#fileMeta"),
   remove: document.querySelector("#removeImage"),
   adultToggle: document.querySelector("#adultToggle"),
+  traceToggle: document.querySelector("#traceToggle"),
+  traceLabel: document.querySelector(".trace-toggle"),
+  privacyNote: document.querySelector("#privacyNote"),
   ageDialog: document.querySelector("#ageDialog"),
   searchButton: document.querySelector("#searchButton"),
   resultsSection: document.querySelector("#resultsSection"),
@@ -29,6 +32,7 @@ document.querySelectorAll(".type-button").forEach((button) => {
     document.querySelectorAll(".type-button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
     state.category = button.dataset.category;
+    syncTraceAvailability();
   });
 });
 
@@ -69,6 +73,8 @@ elements.ageDialog.addEventListener("close", () => {
     elements.adultToggle.checked = false;
   }
 });
+
+elements.traceToggle.addEventListener("change", updatePrivacyNotice);
 
 elements.searchButton.addEventListener("click", searchScene);
 
@@ -116,6 +122,7 @@ async function searchScene() {
       body: JSON.stringify({
         image_base64: state.encodedImage,
         allow_adult: elements.adultToggle.checked && state.adultConfirmed,
+        use_trace_moe: elements.traceToggle.checked,
         category: state.category,
         limit: 8,
       }),
@@ -133,7 +140,13 @@ async function searchScene() {
 
 function renderResults(payload) {
   elements.resultsSection.classList.remove("hidden");
-  elements.resultMeta.textContent = `${payload.indexed_frames.toLocaleString("tr-TR")} kare içinde arandı`;
+  const meta = [`Yerel: ${payload.indexed_frames.toLocaleString("tr-TR")} kare`];
+  const trace = payload.providers?.trace_moe;
+  if (trace?.requested && !payload.external_error) {
+    meta.push(`trace.moe: ${Number(trace.searched_frames || 0).toLocaleString("tr-TR")} kare`);
+  }
+  if (payload.external_error) meta.push("trace.moe kullanılamadı");
+  elements.resultMeta.textContent = meta.join(" · ");
   elements.results.replaceChildren();
 
   if (!payload.results.length) {
@@ -148,17 +161,45 @@ function renderResults(payload) {
       const card = document.createElement("article");
       card.className = "result-card";
       const episode = item.episode ? ` · Bölüm ${escapeHtml(item.episode)}` : "";
+      const score = Math.round(item.similarity);
+      const visual = item.preview_image
+        ? `<div class="result-preview"><img src="${escapeAttribute(item.preview_image)}" alt="" loading="lazy" /><span>%${score}</span></div>`
+        : `<div class="result-score">%${score}</div>`;
+      const provider = item.external
+        ? `<span class="provider-badge">CANLI · ${escapeHtml(item.provider)}</span>`
+        : `<span class="provider-badge local">YEREL İNDEKS</span>`;
+      const previewLink = item.preview_video
+        ? `<a href="${escapeAttribute(item.preview_video)}" target="_blank" rel="noreferrer">Sahne klibi ↗</a>`
+        : "";
       card.innerHTML = `
-        <div class="result-score">%${Math.round(item.similarity)}</div>
-        <div>
+        ${visual}
+        <div class="result-copy">
+          ${provider}
           <h3>${escapeHtml(item.title)}</h3>
           <p>${escapeHtml(item.source_name)}${episode} · ${escapeHtml(item.timestamp)}</p>
         </div>
-        <a href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">Kaynağı aç ↗</a>`;
+        <div class="result-actions">
+          ${previewLink}
+          <a href="${escapeAttribute(item.source_url)}" target="_blank" rel="noreferrer">Kaynağı aç ↗</a>
+        </div>`;
       elements.results.append(card);
     });
   }
   elements.resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function updatePrivacyNotice() {
+  elements.privacyNote.textContent = elements.traceToggle.checked
+    ? "Görsel bellekte işlenir ve anime eşleştirmesi için trace.moe API'sine gönderilir; diske kaydedilmez."
+    : "Görsel yalnızca bu sunucunun belleğinde işlenir; diske kaydedilmez.";
+}
+
+function syncTraceAvailability() {
+  const available = state.category === "all" || state.category === "anime";
+  elements.traceToggle.disabled = !available;
+  elements.traceLabel.classList.toggle("disabled", !available);
+  if (!available) elements.traceToggle.checked = false;
+  updatePrivacyNotice();
 }
 
 function renderError(message) {

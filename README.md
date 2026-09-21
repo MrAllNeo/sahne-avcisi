@@ -4,7 +4,7 @@
 
 Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMHY ana katalog olarak izlenir, keşfedilen siteler inceleme kuyruğuna alınır ve yalnızca teknik, hukuki ve güvenlik kontrollerinden geçen kaynaklar sahne indeksleyicisine bağlanır.
 
-> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. FMHY katalog değişikliklerini sürüm sürüm takip eder. Güvenli kaynak kuyruğu ve temel HTML5/doğrudan video adaptörleri çalışır; siteye özel geniş ölçekli adaptörler henüz geliştirilmemiştir.
+> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. İsteğe bağlı trace.moe aramasıyla normal ve 18+ anime sonuçlarını bölüm/zaman koduyla birleştirir. FMHY katalog takibi, güvenli kaynak kuyruğu ve temel HTML5/doğrudan video adaptörleri çalışır.
 
 ## İlk sürümde çalışanlar
 
@@ -22,6 +22,9 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Yalnızca etkinleştirilmiş kaynaklar için kalıcı indeksleme iş kuyruğu
 - Boyut sınırlı geçici video indirme ve bağımsız FFmpeg worker'ı
 - HTTPS, alan adı, yönlendirme ve özel IP/SSRF kontrolleri
+- Açık kullanıcı onayıyla trace.moe canlı anime sahne araması
+- AniList başlığı, bölüm, zaman kodu, benzerlik ve kısa sahne önizlemesi
+- trace.moe sonuçlarında 18+ içeriği sunucu tarafında ayrıca filtreleme
 - Yönetici anahtarıyla korunan FMHY eşitleme uç noktası
 - Yetişkin kaynaklarını varsayılan olarak gizleme ve 18+ onayı
 - Docker ile çalıştırma
@@ -42,6 +45,14 @@ sahne-avcisi
 ```
 
 Arayüz varsayılan olarak `http://127.0.0.1:8080` adresinde açılır.
+
+trace.moe misafir kotasıyla anahtarsız kullanılabilir. Bir API anahtarınız varsa sunucuya isteğe bağlı olarak verilebilir:
+
+```bash
+TRACE_MOE_API_KEY="anahtar" sahne-avcisi
+```
+
+trace.moe seçeneği arayüzde varsayılan olarak kapalıdır. Kullanıcı açtığında ekran görüntüsü anime eşleştirmesi için üçüncü taraf trace.moe API'sine gönderilir. Görsel Sahne Avcısı tarafından diske yazılmaz; dönen geçici önizleme adresleri de veritabanında saklanmaz.
 
 Docker ile:
 
@@ -134,11 +145,10 @@ Worker doğrudan MP4/WebM/MOV/M4V adreslerini ve HTML sayfasındaki standart vid
 1. Sahne değişimi tabanlı akıllı kare örnekleme
 2. OpenCLIP/SigLIP embedding ve pgvector/Qdrant araması
 3. Altyazı, filigran ve oynatıcı arayüzü maskeleme
-4. Normal anime için trace.moe adaptörü
-5. JustWatch/TMDB metadata zenginleştirme
-6. Açık izinli HLS ve ortak iframe oynatıcı adaptörleri
-7. Kaynak sağlık kontrolleri ve takılı iş kurtarma
-8. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
+4. JustWatch/TMDB metadata zenginleştirme
+5. Açık izinli HLS ve ortak iframe oynatıcı adaptörleri
+6. Kaynak sağlık kontrolleri ve takılı iş kurtarma
+7. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
 
 Detaylı tasarım için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasına bakın.
 
