@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sahne-avcisi"
+version = "0.1.0"
+description = "FMHY-first screenshot-to-scene search engine"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "TOYWES contributors" }]
+dependencies = ["Pillow>=11.0"]
+
+[project.scripts]
+sahne-avcisi = "sahne_avcisi.server:main"
+sahne-index = "sahne_avcisi.indexer:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sahne_avcisi = ["web/*"]
+

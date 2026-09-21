@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Ekran görüntüsünden film, dizi, anime ve yetişkinlere yönelik video sahnesi bulma aracı."
+    />
+    <meta name="color-scheme" content="dark" />
+    <title>Sahne Avcısı — TOYWES</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23080a12'/%3E%3Cpath d='M18 16h28v8H26v8h14c8 0 12 5 12 12S47 56 39 56H16v-8h22c3 0 5-1 5-4s-2-4-5-4H24c-8 0-12-5-12-12 0-5 2-9 6-12Z' fill='%23ff4d6d'/%3E%3Ccircle cx='47' cy='17' r='5' fill='%237ee787'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Sahne Avcısı ana sayfa">
+        <span class="brand-mark">S</span>
+        <span>
+          <strong>Sahne Avcısı</strong>
+          <small>TOYWES / FMHY-first</small>
+        </span>
+      </a>
+      <div class="system-state" aria-label="Sistem durumu">
+        <span class="pulse"></span>
+        <span id="systemState">Motor kontrol ediliyor</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="search-workspace" aria-labelledby="searchTitle">
+        <div class="intro">
+          <p class="eyebrow">GÖRSEL SAHNE ARAMASI</p>
+          <h1 id="searchTitle">Bir kare bırak.<br /><span>Kaynağını bul.</span></h1>
+          <p class="intro-copy">
+            Film, dizi, anime veya indekslenmiş video içindeki sahneyi başlık ve zaman koduyla eşleştir.
+          </p>
+        </div>
+
+        <div class="search-panel">
+          <div class="type-switcher" role="group" aria-label="Arama türü">
+            <button class="type-button active" data-category="all" type="button">Tümü</button>
+            <button class="type-button" data-category="movie-tv" type="button">Film / Dizi</button>
+            <button class="type-button" data-category="anime" type="button">Anime</button>
+          </div>
+
+          <label class="dropzone" id="dropzone" for="imageInput">
+            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+            <span class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="32" height="32">
+                <path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4M8 8l4-4 4 4M12 4v12" />
+              </svg>
+            </span>
+            <span class="drop-copy">
+              <strong id="dropTitle">Ekran görüntüsünü seç veya buraya bırak</strong>
+              <small>JPG, PNG veya WebP · en fazla 12 MB</small>
+            </span>
+            <span class="choose-button">Görsel seç</span>
+          </label>
+
+          <div class="preview-row hidden" id="previewRow">
+            <img id="imagePreview" alt="Arama için seçilen ekran görüntüsü" />
+            <div>
+              <strong id="fileName"></strong>
+              <small id="fileMeta"></small>
+            </div>
+            <button id="removeImage" class="icon-button" type="button" aria-label="Görseli kaldır">×</button>
+          </div>
+
+          <div class="search-options">
+            <label class="adult-toggle">
+              <input id="adultToggle" type="checkbox" />
+              <span class="toggle-track"><span></span></span>
+              <span>
+                <strong>18+ indeksini dahil et</strong>
+                <small>Yalnızca reşit kullanıcılar</small>
+              </span>
+            </label>
+            <button id="searchButton" class="search-button" type="button" disabled>
+              <span>Sahneyi ara</span>
+              <span aria-hidden="true">↗</span>
+            </button>
+          </div>
+
+          <p class="privacy-note">Yüklenen görsel yalnızca arama sırasında bellekte işlenir; diske kaydedilmez.</p>
+        </div>
+      </section>
+
+      <section class="results-section hidden" id="resultsSection" aria-live="polite">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ARAMA SONUÇLARI</p>
+            <h2 id="resultTitle">Eşleşmeler</h2>
+          </div>
+          <span id="resultMeta"></span>
+        </div>
+        <div id="results" class="results-grid"></div>
+      </section>
+
+      <section class="source-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">KAYNAK MOTORU</p>
+            <h2>FMHY ana katalog</h2>
+          </div>
+          <a href="https://fmhy.net/" target="_blank" rel="noreferrer">Kataloğu aç ↗</a>
+        </div>
+
+        <div class="source-layout">
+          <article class="source-card source-primary">
+            <div class="source-orbit" aria-hidden="true">
+              <span>FMHY</span>
+              <i></i><i></i><i></i>
+            </div>
+            <div>
+              <span class="status-label">ANA KAYNAK</span>
+              <h3>Değişen video kaynaklarını tek merkezden keşfet</h3>
+              <p>
+                FMHY bağlantıları kayıt merkezine alınır, sınıflandırılır ve incelemeden geçen kaynaklar sahne
+                indeksleyicisine bağlanır.
+              </p>
+            </div>
+          </article>
+
+          <div class="stat-grid">
+            <article class="stat-card">
+              <span>Kaynaklar</span>
+              <strong id="sourceCount">—</strong>
+              <small>Kayıt merkezinde</small>
+            </article>
+            <article class="stat-card">
+              <span>Aktif</span>
+              <strong id="activeCount">—</strong>
+              <small>Doğrulanmış katalog</small>
+            </article>
+            <article class="stat-card">
+              <span>İçerik</span>
+              <strong id="mediaCount">—</strong>
+              <small>İndekslenmiş video</small>
+            </article>
+            <article class="stat-card">
+              <span>Kareler</span>
+              <strong id="frameCount">—</strong>
+              <small>Aranabilir sahne</small>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Sahne Avcısı · Açık kaynak TOYWES projesi</span>
+      <span>Yalnızca yasal ve izinli içerik indeksleme</span>
+    </footer>
+
+    <dialog id="ageDialog" class="age-dialog">
+      <form method="dialog">
+        <span class="dialog-kicker">18+ İÇERİK</span>
+        <h2>Yetişkin indeksini açmak üzeresin</h2>
+        <p>Devam ederek en az 18 yaşında olduğunu ve bu özelliği bulunduğun yerde kullanabildiğini onaylarsın.</p>
+        <div class="dialog-actions">
+          <button value="cancel" class="secondary-button">Vazgeç</button>
+          <button value="confirm" class="search-button">18 yaşından büyüğüm</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
+

@@ -1,0 +1,168 @@
+[
+  {
+    "id": "fmhy",
+    "name": "FMHY",
+    "base_url": "https://fmhy.net/",
+    "kind": "catalog",
+    "category": "mixed",
+    "adult": false,
+    "status": "active",
+    "priority": 100,
+    "notes": "Ana kaynak keşif kataloğu"
+  },
+  {
+    "id": "fmhy-wiki",
+    "name": "FMHY GitHub Wiki",
+    "base_url": "https://github.com/fmhy/FMHY/wiki",
+    "kind": "catalog",
+    "category": "mixed",
+    "adult": false,
+    "status": "active",
+    "priority": 99,
+    "notes": "FMHY yedek katalog kaynağı"
+  },
+  {
+    "id": "trace-moe",
+    "name": "trace.moe",
+    "base_url": "https://trace.moe/",
+    "kind": "api",
+    "category": "anime",
+    "adult": false,
+    "status": "planned",
+    "priority": 90,
+    "notes": "Normal anime sahne araması"
+  },
+  {
+    "id": "hanime",
+    "name": "hAnime",
+    "base_url": "https://hanime.tv/",
+    "kind": "video-site",
+    "category": "adult-animation",
+    "adult": true,
+    "status": "adapter-required",
+    "priority": 88,
+    "notes": "Yalnızca herkese açık ve izin verilen önizleme/akışlar"
+  },
+  {
+    "id": "rule34video",
+    "name": "Rule34Video",
+    "base_url": "https://rule34video.com/",
+    "kind": "video-site",
+    "category": "adult-animation",
+    "adult": true,
+    "status": "adapter-required",
+    "priority": 86,
+    "notes": "Kaynak ve yaş güvenliği incelemesi zorunlu"
+  },
+  {
+    "id": "pornhub",
+    "name": "Pornhub",
+    "base_url": "https://www.pornhub.com/",
+    "kind": "video-site",
+    "category": "adult",
+    "adult": true,
+    "status": "adapter-required",
+    "priority": 82,
+    "notes": "Yalnızca herkese açık, yasal ve izin verilen içerik"
+  },
+  {
+    "id": "xvideos",
+    "name": "XVideos",
+    "base_url": "https://www.xvideos.com/",
+    "kind": "video-site",
+    "category": "adult",
+    "adult": true,
+    "status": "adapter-required",
+    "priority": 81,
+    "notes": "Yalnızca herkese açık, yasal ve izin verilen içerik"
+  },
+  {
+    "id": "xhamster",
+    "name": "xHamster",
+    "base_url": "https://xhamster.com/",
+    "kind": "video-site",
+    "category": "adult",
+    "adult": true,
+    "status": "adapter-required",
+    "priority": 80,
+    "notes": "Yalnızca herkese açık, yasal ve izin verilen içerik"
+  },
+  {
+    "id": "hentaiheaven",
+    "name": "HentaiHeaven",
+    "base_url": "https://hentaiheaven.xxx/",
+    "kind": "video-site",
+    "category": "adult-animation",
+    "adult": true,
+    "status": "review-required",
+    "priority": 75,
+    "notes": "Teknik ve kullanım koşulları incelemesi gerekli"
+  },
+  {
+    "id": "hentaicity",
+    "name": "HentaiCity",
+    "base_url": "https://hentaicity.com/",
+    "kind": "unknown",
+    "category": "adult-animation",
+    "adult": true,
+    "status": "review-required",
+    "priority": 70,
+    "notes": "Video/galeri yapısı incelenecek"
+  },
+  {
+    "id": "rule34gen",
+    "name": "Rule34Gen",
+    "base_url": "https://rule34gen.com/",
+    "kind": "unknown",
+    "category": "adult-animation",
+    "adult": true,
+    "status": "review-required",
+    "priority": 68,
+    "notes": "İçerik yapısı ve kaynak erişimi incelenecek"
+  },
+  {
+    "id": "embedy",
+    "name": "Embedy",
+    "base_url": "https://embedy.eu/",
+    "kind": "embed-provider",
+    "category": "mixed",
+    "adult": true,
+    "status": "review-required",
+    "priority": 65,
+    "notes": "Gömülü oynatıcı sağlayıcısı olarak incelenecek"
+  },
+  {
+    "id": "biqle",
+    "name": "Biqle",
+    "base_url": "https://biqle.com/",
+    "kind": "aggregator",
+    "category": "adult",
+    "adult": true,
+    "status": "review-required",
+    "priority": 64,
+    "notes": "Toplayıcı ve gömülü kaynak yapısı incelenecek"
+  },
+  {
+    "id": "justwatch",
+    "name": "JustWatch",
+    "base_url": "https://www.justwatch.com/",
+    "kind": "metadata",
+    "category": "movie-tv",
+    "adult": false,
+    "status": "planned",
+    "priority": 60,
+    "notes": "Yasal yayın seçenekleri ve metadata"
+  },
+  {
+    "id": "hdfilmcehennemi",
+    "name": "HDFilmCehennemi",
+    "base_url": "https://www.hdfilmcehennemi.nl/",
+    "kind": "aggregator",
+    "category": "movie-tv",
+    "adult": false,
+    "status": "legal-review",
+    "priority": 20,
+    "notes": "Yalnızca hukuken uygun metadata/kaynak kullanımı değerlendirilecek"
+  }
+]
+
