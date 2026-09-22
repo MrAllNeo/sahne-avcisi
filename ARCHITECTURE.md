@@ -36,7 +36,65 @@ Kaynak durumları:
 - `legal-review`: kullanım hakkı açıklığa kavuşmadan işlenmez.
 - `disabled`: kapalı veya bilinçli olarak devre dışı.
 
-FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi özellikler etiketlenir. İndirme, torrent, canlı TV, durum sayfası ve yardımcı dokümantasyon bağlantıları adaptör kuyruğuna alınmaz.
+FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi özellikler etiketlenir. İndirme, torrent, canlı TV, Smart TV/uygulama listeleri, durum sayfası ve yardımcı dokümantasyon bağlantıları adaptör kuyruğuna alınmaz. İzleme/veritabanı bölümleri `metadata` türüyle kaydedilir; `enqueue_index_job` bu türü zaten reddeder.
+
+Durum alanı yalnızca operatöre aittir: katalog eşitlemesi yeni kaynağı `review-required` ile oluşturur, ancak var olan bir kaydın durumunu güncellemez. Böylece tekrarlanan eşitlemeler elle verilmiş `active`/`disabled` kararlarını geri almaz.
+
+### Akıştan indeksleme
+
+Bir uzun metrajlı film birkaç yüz megabayt, ama geriye bıraktığı parmak izi
+birkaç yüz kilobayt. Filmi önce diske yazmak bu oranı ters çeviriyor ve küçük
+bir sunucuda aynı anda kaç iş koşabileceğini diskin belirlemesine yol açıyordu.
+
+Worker artık gövdeyi kendi doğrulanmış HTTP istemcisinden okuyup doğrudan
+FFmpeg'in `stdin`'ine besliyor. Aktarım bizim istemcimizde kaldığı için HTTPS,
+yönlendirme, özel IP ve boyut kontrolleri aynen geçerli: FFmpeg kendi soketini
+hiç açmıyor. Bu, adrese doğrudan FFmpeg'i bakmaktan farkı olan asıl noktadır.
+
+Ölçülen (Archive.org'dan 25 MB'lık bir film): indir-sonra-işle 14,5 sn ve
+25 MB disk; akış 5,8 sn ve 0 MB. Çıkan kareler ve arama sonuçları birebir aynı.
+
+Boru aranamadığı için iki şey değişir: süre bilgisi `ffprobe` yerine katalog
+metadatasından gelir (`AdapterResult.duration_ms`), ve dizinini dosya sonunda
+tutan kapsayıcılar çözülemez. İkinci durumda `StreamingUnsupportedError`
+fırlatılır ve worker eski indirme yoluna düşer. HLS aynalaması akışa girmez;
+kendi yolunda kalır.
+
+### Eşzamanlı indeksleme
+
+İş kapma zaten yarışmasızdı: `claim_index_job` `BEGIN IMMEDIATE` ile yazma
+kilidini alır ve `status='queued'` koşullu `UPDATE`'in `rowcount`'unu kontrol
+eder, yani iki worker aynı işi alamaz. Eşzamanlılığı açmak için gereken diğer
+iki parça eklendi.
+
+`HostLimiter` tek bir alan adına aynı anda açılacak aktarım sayısını sınırlar.
+Eşzamanlılık bizim verimimiz için; çektiğimiz kataloğun bunu hissetmemesi
+gerekir. Toplu içe aktarmada işlerin neredeyse tamamı aynı siteye gittiği için
+pratikte hızı belirleyen sayı da budur.
+
+SQLite bağlantılarında `busy_timeout` 30 saniyeye çıkarıldı. Python'ın
+varsayılanı 5 saniyedir; tek bir işin binlerce kare yazması bunu aşabilir ve
+diğer worker'a "database is locked" döndürebilir.
+
+Ölçülen (6 kısa film, 4 çekirdek): sıralı 34,9 sn, `--concurrency 4
+--per-host 4` ile 16,2 sn. Hızlanma doğrusal değil; nezaket sınırı bilerek
+bağlayıcı kısıt bırakıldı ve kare çıkarma CPU'ya bağlı.
+
+### Internet Archive adaptörü
+
+`archive-org` türündeki kaynak, oynatıcı sayfası kazımak yerine Archive'ın
+belgelenmiş `archive.org/metadata/<id>` API'sini kullanır: öğe kimliği URL'den
+çıkarılır, dosya listesinden en uygun video rendition'ı seçilir ve
+`archive.org/download/...` adresi doğrudan indirme hedefi olur.
+
+Adaptör iki kapı uygular. Öğenin `mediatype` alanı `movies` değilse reddedilir.
+Lisans alanı (`licenseurl`/`license`/`rights`) kamu malı veya Creative Commons
+göstermiyorsa da reddedilir — eksik lisans izin sayılmaz. Her iki durumda da iş
+`failed` değil `blocked` olur, çünkü bu öğenin kalıcı bir özelliğidir, geçici bir
+aktarım hatası değil.
+
+Boyut tavanı worker'ın `max_video_bytes` değerinden gelir; adaptör dosya seçimini
+buna göre daraltır, indirme koruması ayrıca yeniden doğrular.
 
 ### Kaynak adaptörü sözleşmesi
 
@@ -107,7 +165,58 @@ Dönen sonuçlar yerel sonuç modeliyle birleştirilir. AniList başlığı, bö
 
 ## Ölçekleme planı
 
-MVP SQLite üzerinde bütün kareleri uygulama belleğinde puanlar. Büyük katalog için bu yaklaşım değiştirilmelidir:
+## Arama performansı
+
+Hash'ler `frames` tablosunda 64-bit `INTEGER` olarak saklanır ve bellekte
+bitişik `uint64` dizileri hâlinde tutulur; puanlama numpy ile vektörleştirilmiş
+tek bir XOR + popcount geçişidir. Önbellek, kare sayısı veya en büyük kare
+kimliği değiştiğinde yeniden kurulur.
+
+Daha önce hash'ler `TEXT` idi ve her karşılaştırmada hex parse ediliyordu; bu,
+arama süresinin neredeyse tamamını oluşturuyordu. 200 bin karede ölçülen fark:
+
+| Yaklaşım | Arama | Kalıcı RAM |
+|---|---|---|
+| Hex metin, satır satır puanlama | 5.092 ms | — |
+| INTEGER + numpy vektör | **1,92 ms** | 51 bayt/kare |
+
+Bu ölçekte tarama O(n) kalır ama bellek bant genişliğinde çalışır: 20,7 milyon
+kare (tüm kamu malı arşivi) yaklaşık 199 ms ve 830 MB'a denk gelir.
+
+LSH veya BK-tree denenmedi çünkü varsayılan eşik olan 0,55 benzerlik 128 bitte
+57 bitlik farka izin verir; bu mesafede güvercin yuvası prensibi tutmaz ve
+hiçbir bucket şeması aday sayısını anlamlı biçimde azaltmaz. Eşik belirgin
+şekilde sıkılaştırılırsa bu yapılar yeniden gündeme gelebilir.
+
+## Kare örnekleme: neden sabit aralık
+
+Yol haritasında bir süre "sahne değişimi tabanlı akıllı örnekleme" maddesi
+durdu. Ölçüldü ve **kötü çıktı**; madde bu yüzden kaldırıldı.
+
+Deney: 378 saniyelik bir film, hiçbir örnekleme noktasına hizalanmamış 29
+rastgele sorgu karesi. Her indekste sorgunun bulduğu en iyi benzerlik:
+
+| Yaklaşım | Kare | Ortalama | Medyan | ≥%85 bulan |
+|---|---|---|---|---|
+| Sabit 2 sn | 189 | %94,1 | %99,2 | 24/29 |
+| Sabit 6 sn | 63 | %89,1 | %93,8 | 19/29 |
+| Sahne değişimi (eşik 0,3) | 64 | %72,9 | %67,2 | 5/29 |
+
+Kritik karşılaştırma son iki satır: neredeyse aynı indeks boyutunda sahne
+tespiti, düz seyrek örneklemenin belirgin biçimde altında kalıyor.
+
+Sebep, parmak izinin neye dayanıklı olduğuyla ilgili. Yeniden kodlama ve renk
+düzenlemesine karşı bağışık (ölçüldü: %97-100), ama **içerik değişimine karşı
+değil**. Bir çekimin yalnızca ilk karesini saklamak, o çekim boyunca kamera
+veya oyuncu hareket ettiğinde ortadaki anları kapsamasız bırakıyor. Eşleşmeyi
+belirleyen şey çekim sayısı değil, görsel zaman çizgisinin ne kadarının
+örneklendiği.
+
+Pratik sonuç: indeksi küçültmek istiyorsan `--interval` değerini büyüt. 2
+saniyeden 6 saniyeye çıkmak kareyi üçte bire indiriyor ve ortalama benzerlikten
+yaklaşık 5 puan götürüyor — okunabilir bir takas.
+
+Bundan sonraki ölçek adımı için:
 
 - Metadata: PostgreSQL
 - Vektörler: pgvector veya Qdrant

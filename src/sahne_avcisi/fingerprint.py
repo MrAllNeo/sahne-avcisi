@@ -12,10 +12,19 @@ class InvalidImageError(ValueError):
 
 @dataclass(frozen=True)
 class Fingerprint:
-    dhash: str
-    ahash: str
+    dhash: int
+    ahash: int
     width: int
     height: int
+
+
+def to_signed64(value: int) -> int:
+    """Reinterpret an unsigned 64-bit hash as signed, for SQLite INTEGER."""
+    return value - (1 << 64) if value >= (1 << 63) else value
+
+
+def to_unsigned64(value: int) -> int:
+    return value + (1 << 64) if value < 0 else value
 
 
 def _open_image(data: bytes) -> Image.Image:
@@ -41,9 +50,17 @@ def _trim_near_black_borders(image: Image.Image, threshold: int = 12) -> Image.I
     return cropped
 
 
+def _flattened_pixels(image: Image.Image) -> list[int]:
+    # Pillow 11.0 does not have get_flattened_data(); it was added later.
+    get_flattened_data = getattr(image, "get_flattened_data", None)
+    if get_flattened_data is not None:
+        return list(get_flattened_data())
+    return list(image.getdata())
+
+
 def _difference_hash(image: Image.Image, size: int = 8) -> int:
     resized = image.convert("L").resize((size + 1, size), Image.Resampling.LANCZOS)
-    pixels = list(resized.get_flattened_data())
+    pixels = _flattened_pixels(resized)
     result = 0
     for row in range(size):
         offset = row * (size + 1)
@@ -55,7 +72,7 @@ def _difference_hash(image: Image.Image, size: int = 8) -> int:
 
 def _average_hash(image: Image.Image, size: int = 8) -> int:
     resized = image.convert("L").resize((size, size), Image.Resampling.LANCZOS)
-    pixels = list(resized.get_flattened_data())
+    pixels = _flattened_pixels(resized)
     mean = sum(pixels) / len(pixels)
     result = 0
     for value in pixels:
@@ -69,17 +86,17 @@ def fingerprint_bytes(data: bytes) -> Fingerprint:
     width, height = image.size
     normalized = _trim_near_black_borders(image)
     return Fingerprint(
-        dhash=f"{_difference_hash(normalized):016x}",
-        ahash=f"{_average_hash(normalized):016x}",
+        dhash=_difference_hash(normalized),
+        ahash=_average_hash(normalized),
         width=width,
         height=height,
     )
 
 
-def hamming_distance(left: str, right: str) -> int:
-    return (int(left, 16) ^ int(right, 16)).bit_count()
+def hamming_distance(left: int, right: int) -> int:
+    return (left ^ right).bit_count()
 
 
-def similarity(query: Fingerprint, candidate_dhash: str, candidate_ahash: str) -> float:
+def similarity(query: Fingerprint, candidate_dhash: int, candidate_ahash: int) -> float:
     distance = hamming_distance(query.dhash, candidate_dhash) + hamming_distance(query.ahash, candidate_ahash)
     return max(0.0, 1.0 - distance / 128.0)

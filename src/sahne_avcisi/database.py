@@ -6,8 +6,29 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from .fingerprint import Fingerprint, similarity
+import numpy as np
 
+from .fingerprint import Fingerprint, to_signed64, to_unsigned64
+
+_FILTERABLE_CATEGORIES = {"movie-tv", "anime", "adult", "adult-animation"}
+
+BUSY_TIMEOUT_MS = 30_000
+
+
+FRAMES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS frames (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    timestamp_ms INTEGER NOT NULL,
+    dhash INTEGER NOT NULL,
+    ahash INTEGER NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    UNIQUE(media_id, timestamp_ms)
+);
+
+CREATE INDEX IF NOT EXISTS idx_frames_media ON frames(media_id);
+"""
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -43,18 +64,6 @@ CREATE TABLE IF NOT EXISTS media (
     UNIQUE(source_id, source_url)
 );
 
-CREATE TABLE IF NOT EXISTS frames (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
-    timestamp_ms INTEGER NOT NULL,
-    dhash TEXT NOT NULL,
-    ahash TEXT NOT NULL,
-    width INTEGER NOT NULL,
-    height INTEGER NOT NULL,
-    UNIQUE(media_id, timestamp_ms)
-);
-
-CREATE INDEX IF NOT EXISTS idx_frames_media ON frames(media_id);
 CREATE INDEX IF NOT EXISTS idx_media_adult ON media(adult);
 CREATE INDEX IF NOT EXISTS idx_sources_status ON sources(status);
 
@@ -133,8 +142,48 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            connection.executescript(FRAMES_SCHEMA)
             self._migrate_sources(connection)
+            self._migrate_frame_hashes(connection)
             connection.execute("PRAGMA optimize")
+
+    @staticmethod
+    def _migrate_frame_hashes(connection: sqlite3.Connection) -> None:
+        """Convert pre-0.7 hex-string hashes to INTEGER in place.
+
+        Storing them as text forced a hex parse per candidate on every query,
+        which dominated search time and blocked vectorised scoring.
+        """
+        columns = {
+            row["name"]: (row["type"] or "").upper()
+            for row in connection.execute("PRAGMA table_info(frames)").fetchall()
+        }
+        if columns.get("dhash") != "TEXT":
+            return
+
+        connection.execute("ALTER TABLE frames RENAME TO frames_legacy")
+        connection.executescript(FRAMES_SCHEMA)
+        rows = connection.execute(
+            "SELECT media_id, timestamp_ms, dhash, ahash, width, height FROM frames_legacy"
+        ).fetchall()
+        connection.executemany(
+            """
+            INSERT INTO frames (media_id, timestamp_ms, dhash, ahash, width, height)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["media_id"],
+                    row["timestamp_ms"],
+                    to_signed64(int(row["dhash"], 16)),
+                    to_signed64(int(row["ahash"], 16)),
+                    row["width"],
+                    row["height"],
+                )
+                for row in rows
+            ],
+        )
+        connection.execute("DROP TABLE frames_legacy")
 
     @staticmethod
     def _migrate_sources(connection: sqlite3.Connection) -> None:
@@ -148,6 +197,10 @@ class Database:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        # The sqlite3 default of five seconds is short for a bulk import, where
+        # a writer can be mid-transaction over a whole film's frames.
+        connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        connection.execute("PRAGMA foreign_keys=ON")
         try:
             yield connection
             connection.commit()
@@ -245,27 +298,67 @@ class Database:
             ).fetchone()
             return int(row["id"])
 
-    def add_frame(self, media_id: int, timestamp_ms: int, fingerprint: Fingerprint) -> None:
+    def replace_frames(self, media_id: int, frames: list[tuple[int, Fingerprint]]) -> None:
+        """Replace all frames for a media in one transaction (used on (re)indexing)."""
         with self.connect() as connection:
-            connection.execute(
+            connection.execute("DELETE FROM frames WHERE media_id=?", (media_id,))
+            connection.executemany(
                 """
                 INSERT INTO frames (media_id, timestamp_ms, dhash, ahash, width, height)
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(media_id, timestamp_ms) DO UPDATE SET
-                    dhash=excluded.dhash,
-                    ahash=excluded.ahash,
-                    width=excluded.width,
-                    height=excluded.height
                 """,
-                (
-                    media_id,
-                    timestamp_ms,
-                    fingerprint.dhash,
-                    fingerprint.ahash,
-                    fingerprint.width,
-                    fingerprint.height,
-                ),
+                [
+                    (
+                        media_id,
+                        timestamp_ms,
+                        to_signed64(fingerprint.dhash),
+                        to_signed64(fingerprint.ahash),
+                        fingerprint.width,
+                        fingerprint.height,
+                    )
+                    for timestamp_ms, fingerprint in frames
+                ],
             )
+
+    def _frame_index(self) -> dict:
+        """Hashes as contiguous uint64 arrays, rebuilt when the index changes.
+
+        Scoring runs over every frame, so the only way to keep that affordable
+        is to hand numpy one flat array instead of per-row Python objects.
+        """
+        with self.connect() as connection:
+            # Kept as two statements on purpose: SQLite serves each from an
+            # index, but combining them into one SELECT forces a table scan.
+            frame_count = connection.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+            max_id = connection.execute("SELECT COALESCE(MAX(id), 0) FROM frames").fetchone()[0]
+            revision = (int(frame_count), int(max_id))
+            cached = getattr(self, "_frame_index_cache", None)
+            if cached is not None and cached["revision"] == revision:
+                return cached
+
+            rows = connection.execute(
+                "SELECT media_id, timestamp_ms, dhash, ahash FROM frames ORDER BY id"
+            ).fetchall()
+            media_rows = connection.execute(
+                """
+                SELECT m.id, m.title, m.episode, m.category, m.adult, m.source_url,
+                       s.name AS source_name
+                FROM media m JOIN sources s ON s.id=m.source_id
+                """
+            ).fetchall()
+
+        count = len(rows)
+        index = {
+            "revision": revision,
+            "count": count,
+            "dhash": np.fromiter((to_unsigned64(row[2]) for row in rows), dtype=np.uint64, count=count),
+            "ahash": np.fromiter((to_unsigned64(row[3]) for row in rows), dtype=np.uint64, count=count),
+            "media_id": np.fromiter((row[0] for row in rows), dtype=np.int64, count=count),
+            "timestamp_ms": np.fromiter((row[1] for row in rows), dtype=np.int64, count=count),
+            "media": {int(row["id"]): dict(row) for row in media_rows},
+        }
+        self._frame_index_cache = index
+        return index
 
     def search(
         self,
@@ -276,37 +369,63 @@ class Database:
         limit: int = 8,
         minimum_similarity: float = 0.55,
     ) -> list[dict]:
-        conditions: list[str] = []
-        params: list[str] = []
-        if not allow_adult:
-            conditions.append("m.adult=0")
-        if category in {"movie-tv", "anime", "adult", "adult-animation"}:
-            conditions.append("m.category=?")
-            params.append(category)
-        where = "WHERE " + " AND ".join(conditions) if conditions else ""
-        query = f"""
-            SELECT f.timestamp_ms, f.dhash, f.ahash, m.title, m.episode, m.category,
-                   m.adult, m.source_url, s.name AS source_name
-            FROM frames f
-            JOIN media m ON m.id=f.media_id
-            JOIN sources s ON s.id=m.source_id
-            {where}
-        """
-        with self.connect() as connection:
-            rows = connection.execute(query, params).fetchall()
+        index = self._frame_index()
+        if not index["count"]:
+            return []
 
-        scored = []
-        for row in rows:
-            item = dict(row)
-            raw_similarity = similarity(fingerprint, item.pop("dhash"), item.pop("ahash"))
-            if raw_similarity < minimum_similarity:
+        limit = max(1, min(limit, 25))
+        max_distance = int((1.0 - minimum_similarity) * 128)
+
+        distance = np.bitwise_count(index["dhash"] ^ np.uint64(fingerprint.dhash)).astype(np.uint16)
+        distance += np.bitwise_count(index["ahash"] ^ np.uint64(fingerprint.ahash))
+
+        allowed = {
+            media_id
+            for media_id, media in index["media"].items()
+            if (allow_adult or not media["adult"])
+            and (category not in _FILTERABLE_CATEGORIES or media["category"] == category)
+        }
+        if not allowed:
+            return []
+        if len(allowed) < len(index["media"]):
+            excluded = np.isin(index["media_id"], list(allowed), invert=True)
+            distance[excluded] = 255
+
+        candidates = np.flatnonzero(distance <= max_distance)
+        if not candidates.size:
+            return []
+        # Every candidate has to stay in play until the dedup below: a single
+        # video can hold the closest thousand frames, so trimming to `limit`
+        # first would leave no room for the other videos that should surface.
+        candidates = candidates[np.argsort(distance[candidates], kind="stable")]
+
+        results = []
+        seen_media: set[int] = set()
+        for position in candidates:
+            media_id = int(index["media_id"][position])
+            # A static scene matches many timestamps of the same video; keep
+            # only its strongest frame so distinct videos get the other slots.
+            if media_id in seen_media:
                 continue
-            item["similarity"] = round(raw_similarity * 100, 2)
-            item["timestamp"] = _format_timestamp(int(item["timestamp_ms"]))
-            item["adult"] = bool(item["adult"])
-            scored.append(item)
-        scored.sort(key=lambda item: item["similarity"], reverse=True)
-        return scored[: max(1, min(limit, 25))]
+            seen_media.add(media_id)
+            media = index["media"][media_id]
+            timestamp_ms = int(index["timestamp_ms"][position])
+            results.append(
+                {
+                    "timestamp_ms": timestamp_ms,
+                    "timestamp": _format_timestamp(timestamp_ms),
+                    "title": media["title"],
+                    "episode": media["episode"],
+                    "category": media["category"],
+                    "adult": bool(media["adult"]),
+                    "source_url": media["source_url"],
+                    "source_name": media["source_name"],
+                    "similarity": round((1.0 - int(distance[position]) / 128.0) * 100, 2),
+                }
+            )
+            if len(results) == limit:
+                break
+        return results
 
     def stats(self) -> dict:
         with self.connect() as connection:
@@ -372,6 +491,21 @@ class Database:
                 "SELECT * FROM index_jobs WHERE source_id=? AND page_url=?", (source_id, page_url)
             ).fetchone()
         return dict(row)
+
+    def requeue_stale_jobs(self, stale_minutes: float) -> int:
+        """Requeue jobs stuck in 'running' longer than stale_minutes (e.g. after a crashed worker)."""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE index_jobs
+                SET status='queued', started_at=NULL, updated_at=CURRENT_TIMESTAMP
+                WHERE status='running'
+                  AND started_at IS NOT NULL
+                  AND started_at <= datetime('now', ?)
+                """,
+                (f"-{max(0, int(stale_minutes))} minutes",),
+            )
+            return cursor.rowcount
 
     def claim_index_job(self) -> dict | None:
         with self.connect() as connection:
@@ -500,13 +634,15 @@ class Database:
     def apply_catalog_snapshot(self, run_id: int, catalog_id: str, sources: list[dict]) -> dict[str, int]:
         counts = {"discovered": len(sources), "created": 0, "updated": 0, "missing": 0, "restored": 0}
         seen_ids = {source["id"] for source in sources}
+        # "status" is deliberately absent: the catalog only ever proposes
+        # "review-required", so re-syncing must not undo an operator's decision
+        # to activate or block a source.
         tracked_fields = (
             "name",
             "base_url",
             "kind",
             "category",
             "adult",
-            "status",
             "priority",
             "notes",
             "section",
@@ -555,7 +691,7 @@ class Database:
                     )
                     ON CONFLICT(id) DO UPDATE SET
                         name=excluded.name, base_url=excluded.base_url, kind=excluded.kind,
-                        category=excluded.category, adult=excluded.adult, status=excluded.status,
+                        category=excluded.category, adult=excluded.adult,
                         priority=excluded.priority, notes=excluded.notes, section=excluded.section,
                         tags_json=excluded.tags_json,
                         discovered_from=COALESCE(sources.discovered_from, excluded.discovered_from),

@@ -59,6 +59,73 @@ class FmhyDiscoveryTests(unittest.TestCase):
         self.assertIn("auto-next", source["tags"])
         self.assertIn("4k", source["tags"])
 
+    def test_starred_entries_are_detected_from_the_rendered_list_item_class(self) -> None:
+        # FMHY renders its star as a CSS class, not a literal emoji.
+        html = """
+        <h2>Streaming Sites</h2>
+        <h3>Multi-Server</h3>
+        <ul>
+          <li class="starred"><span class="i-twemoji-glowing-star"></span>
+              <strong><a href="https://starred.example/">Starred Site</a></strong> - Movies / TV</li>
+          <li><a href="https://plain.example/">Plain Site</a> - Movies / TV</li>
+        </ul>
+        """
+        sources = {source["name"]: source for source in discover_links(html, "https://fmhy.net/video")}
+        self.assertIn("fmhy-starred", sources["Starred Site"]["tags"])
+        self.assertNotIn("fmhy-starred", sources["Plain Site"]["tags"])
+        self.assertGreater(sources["Starred Site"]["priority"], sources["Plain Site"]["priority"])
+
+    def test_reference_databases_are_kept_as_metadata_not_video_sources(self) -> None:
+        html = """
+        <h2>Tracking / Databases</h2>
+        <ul><li><a href="https://tracker.example/">Tracker</a> - Movies / TV</li></ul>
+        """
+        sources = discover_links(html, "https://fmhy.net/video")
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0]["kind"], "metadata")
+
+    def test_non_video_sections_are_skipped(self) -> None:
+        html = """
+        <h2>Smart TV</h2>
+        <ul><li><a href="https://tvapp.example/">TV App</a></li></ul>
+        <h2>Streaming Apps</h2>
+        <ul><li><a href="https://app.example/">An App</a></li></ul>
+        <h2>Helpful Sites / Tools</h2>
+        <ul><li><a href="https://tool.example/">A Tool</a></li></ul>
+        <h2>Base64 Encoded Link</h2>
+        <ul><li><a href="https://b64.example/">Encoded</a></li></ul>
+        """
+        self.assertEqual(discover_links(html, "https://fmhy.net/video"), [])
+
+    def test_sync_does_not_reset_an_operator_activated_source(self) -> None:
+        source = {
+            "id": "fmhy-site-example",
+            "name": "Example",
+            "base_url": "https://example.com/",
+            "kind": "stream-aggregator",
+            "category": "movie-tv",
+            "adult": False,
+            "status": "review-required",
+            "priority": 62,
+            "section": "Streaming Sites",
+            "tags": [],
+            "discovered_from": "https://fmhy.net/video",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "curation.sqlite3")
+
+            first_run = database.start_catalog_sync("fmhy-video", "https://fmhy.net/video")
+            database.apply_catalog_snapshot(first_run, "fmhy-video", [source])
+
+            database.upsert_source({**source, "status": "active"})
+            self.assertEqual(len(database.list_sources()), 1)
+
+            second_run = database.start_catalog_sync("fmhy-video", "https://fmhy.net/video")
+            counts = database.apply_catalog_snapshot(second_run, "fmhy-video", [source])
+
+            self.assertEqual(counts["updated"], 0)
+            self.assertEqual(database.list_sources()[0]["status"], "active")
+
     def test_catalog_snapshot_tracks_created_missing_and_restored_sources(self) -> None:
         source = {
             "id": "fmhy-site-example",

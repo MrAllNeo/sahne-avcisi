@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -38,6 +39,13 @@ class FakeDownloadClient:
     def download_video(self, url: str, destination: Path, *, max_bytes: int):
         destination.write_bytes(b"fake-video")
         return url
+
+    @contextmanager
+    def stream_video(self, url: str, *, max_bytes: int):
+        # The bytes are not a real container, so FFmpeg produces no frames and
+        # the worker falls back to the download path — which is the behaviour
+        # these tests cover.
+        yield iter([b"fake-video"])
 
 
 class FakeRegistry:

@@ -51,7 +51,12 @@ class TraceMoeClient:
             exc.close()
             if exc.code == 429:
                 raise TraceMoeError("trace.moe istek sınırına ulaşıldı; biraz sonra tekrar dene.") from exc
-            if exc.code in {402, 503, 504}:
+            if exc.code == 402:
+                raise TraceMoeError(
+                    "trace.moe arama kotanız doldu; günlük ücretsiz kota yenilenene kadar bekleyin "
+                    "ya da bir API anahtarı ekleyin."
+                ) from exc
+            if exc.code in {503, 504}:
                 raise TraceMoeError("trace.moe şu anda yoğun veya geçici olarak kullanılamıyor.") from exc
             raise TraceMoeError(f"trace.moe HTTP {exc.code} yanıtı verdi.") from exc
         except (URLError, TimeoutError, OSError) as exc:

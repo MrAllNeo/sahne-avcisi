@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hmac
 import json
 import mimetypes
 import os
@@ -13,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from .adapters import source_allows_url
 from .database import Database
 from .fingerprint import InvalidImageError, fingerprint_bytes
+from . import ratelimit
 from .fmhy import sync_fmhy
 from .source_registry import load_seed_sources
 from .trace_moe import TraceMoeClient, TraceMoeError
@@ -21,6 +23,29 @@ from .trace_moe import TraceMoeClient, TraceMoeError
 PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
 PROJECT_DIR = PACKAGE_DIR.parents[1]
+
+TRACE_MOE_LOCAL_MATCH_THRESHOLD = 90.0
+
+
+def admin_token_matches(expected: str | None, provided: str | None) -> bool:
+    if not expected or not provided:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
+def should_query_trace_moe(
+    *,
+    enabled: bool,
+    requested: bool,
+    category: str,
+    best_local_similarity: float,
+    threshold: float = TRACE_MOE_LOCAL_MATCH_THRESHOLD,
+) -> bool:
+    if not enabled or not requested:
+        return False
+    if category not in {"all", "anime"}:
+        return False
+    return best_local_similarity < threshold
 
 
 class Application:
@@ -33,6 +58,8 @@ class Application:
             source_file = Path.cwd() / "config" / "sources.json"
         load_seed_sources(self.database, source_file)
         self.trace_moe = TraceMoeClient(api_key=os.environ.get("TRACE_MOE_API_KEY"))
+        self.trace_moe_enabled = os.environ.get("SAHNE_TRACE_MOE", "1").strip() != "0"
+        self.rate_limiter = ratelimit.from_environment(dict(os.environ))
 
 
 APP = Application()
@@ -45,6 +72,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
             self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.5.0"})
+            return
+        if parsed.path.startswith("/api/") and self.reject_untrusted():
             return
         if parsed.path == "/api/stats":
             self.send_json(APP.database.stats())
@@ -93,6 +122,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_json({"error": "Rota bulunamadı."}, HTTPStatus.NOT_FOUND)
 
     def handle_search(self) -> None:
+        if self.reject_untrusted() or self.reject_over_rate_limit():
+            return
         try:
             payload = self.read_json(max_bytes=20 * 1024 * 1024)
             encoded = str(payload.get("image_base64", ""))
@@ -110,9 +141,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 category=category,
                 limit=limit,
             )
-            trace_status = {"requested": False, "searched_frames": 0}
+            trace_status = {"requested": False, "searched_frames": 0, "enabled": APP.trace_moe_enabled}
             external_error = None
-            if payload.get("use_trace_moe") is True and category in {"all", "anime"}:
+            best_local_similarity = max((float(item.get("similarity", 0)) for item in results), default=0.0)
+            if should_query_trace_moe(
+                enabled=APP.trace_moe_enabled,
+                requested=payload.get("use_trace_moe") is True,
+                category=category,
+                best_local_similarity=best_local_similarity,
+            ):
                 trace_status["requested"] = True
                 try:
                     trace_result = APP.trace_moe.search(
@@ -177,8 +214,41 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def is_admin(self) -> bool:
-        expected = os.environ.get("SAHNE_ADMIN_TOKEN")
-        return bool(expected) and self.headers.get("X-Admin-Token") == expected
+        return admin_token_matches(os.environ.get("SAHNE_ADMIN_TOKEN"), self.headers.get("X-Admin-Token"))
+
+    def caller_is_trusted(self) -> bool:
+        """True when the caller presented the configured service token."""
+        expected = os.environ.get("SAHNE_INTERNAL_TOKEN")
+        supplied = self.headers.get("X-Sahne-Internal-Token") or ""
+        return bool(expected) and hmac.compare_digest(supplied, expected)
+
+    def reject_untrusted(self) -> bool:
+        """Refuse the request when a service token is configured but absent.
+
+        The service is deployed with a public URL of its own, so the calling
+        site's own rate limits do not protect it. When no token is set the
+        endpoint stays open, which keeps local use and self-hosting simple.
+        """
+        if not os.environ.get("SAHNE_INTERNAL_TOKEN"):
+            return False
+        if self.caller_is_trusted():
+            return False
+        self.send_json({"error": "Bu servis kimlik doğrulaması istiyor."}, HTTPStatus.UNAUTHORIZED)
+        return True
+
+    def client_key(self) -> str:
+        return self.client_address[0] if self.client_address else "bilinmeyen"
+
+    def reject_over_rate_limit(self) -> bool:
+        key = self.client_key()
+        if APP.rate_limiter.allow(key):
+            return False
+        self.send_json(
+            {"error": "Çok fazla istek gönderildi; biraz sonra tekrar deneyin."},
+            HTTPStatus.TOO_MANY_REQUESTS,
+            extra_headers={"Retry-After": str(APP.rate_limiter.retry_after(key))},
+        )
+        return True
 
     @staticmethod
     def parse_limit(query: dict[str, list[str]], default: int) -> int:
@@ -227,13 +297,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
-    def send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
+    def send_json(
+        self,
+        payload: dict,
+        status: HTTPStatus = HTTPStatus.OK,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 

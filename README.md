@@ -20,14 +20,25 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Kaynak adaptörü geliştirme kuyruğu
 - HTML5 video, Open Graph video, Video.js, JWPlayer, Plyr, HLS ve iframe oynatıcı tespiti
 - Yalnızca etkinleştirilmiş kaynaklar için kalıcı indeksleme iş kuyruğu
-- Boyut sınırlı geçici video indirme ve bağımsız FFmpeg worker'ı
+- Videoyu diske yazmadan doğrudan akıştan indeksleme; boru üzerinden okunamayan kapsayıcılar için boyut sınırlı indirmeye geri düşüş
 - Açık, şifresiz ve tamamlanmış HLS VOD manifestlerini güvenli yerel aynaya alma
 - HTTPS, alan adı, yönlendirme ve özel IP/SSRF kontrolleri
+- Internet Archive kamu malı film arşivinden toplu indeks doldurma
+- Archive.org öğelerinde lisans doğrulaması; lisansı belirtilmemiş öğeleri indekslememe
 - Açık kullanıcı onayıyla trace.moe canlı anime sahne araması
+- Yerel indekste zaten güçlü bir eşleşme (%90 üzeri) varsa trace.moe'ye sorulmaz; kota sadece gerektiğinde harcanır
+- `SAHNE_TRACE_MOE=0` ile trace.moe federasyonunu tamamen kapatma
 - AniList başlığı, bölüm, zaman kodu, benzerlik ve kısa sahne önizlemesi
 - trace.moe sonuçlarında 18+ içeriği sunucu tarafında ayrıca filtreleme
-- Yönetici anahtarıyla korunan FMHY eşitleme uç noktası
+- trace.moe kota (402) ve hız sınırı (429) hataları için ayrı, anlaşılır Türkçe uyarılar
+- Servis token'ı ile korunabilen API ve arama ucunda istemci başına hız sınırı
+- Yönetici anahtarıyla korunan FMHY eşitleme uç noktası; anahtar karşılaştırması zamanlama saldırılarına karşı `hmac.compare_digest` ile yapılır
 - Yetişkin kaynaklarını varsayılan olarak gizleme ve 18+ onayı
+- Parmak izleri 64-bit tamsayı olarak saklanır ve bellekte bitişik dizilerde tutulur; sahne araması numpy ile vektörleştirilmiş tek geçişte puanlanır (indeks değiştiğinde otomatik yenilenir)
+- Kare yazımı tek işlemde toplu yapılır; bir video yeniden indekslenirse eski kareleri otomatik siler
+- Var olmayan bir kaynak kimliğiyle indeksleme denemesi açık bir hata mesajıyla reddedilir
+- FFmpeg/FFprobe kurulu değilse net bir hata ile durur
+- Takılı kalan indeksleme işleri worker başlangıcında otomatik yeniden kuyruğa alınır
 - Docker ile çalıştırma
 
 ## Hızlı başlangıç
@@ -53,7 +64,15 @@ trace.moe misafir kotasıyla anahtarsız kullanılabilir. Bir API anahtarınız 
 TRACE_MOE_API_KEY="anahtar" sahne-avcisi
 ```
 
-trace.moe seçeneği arayüzde varsayılan olarak kapalıdır. Kullanıcı açtığında ekran görüntüsü anime eşleştirmesi için üçüncü taraf trace.moe API'sine gönderilir. Görsel Sahne Avcısı tarafından diske yazılmaz; dönen geçici önizleme adresleri de veritabanında saklanmaz.
+trace.moe seçeneği arayüzde varsayılan olarak kapalıdır. Kullanıcı açtığında, kategori `all` ya da `anime` ise ve yerel indekste zaten %90 üzeri bir eşleşme yoksa, ekran görüntüsü anime eşleştirmesi için üçüncü taraf trace.moe API'sine (`POST https://api.trace.moe/search?anilistInfo&cutBorders=2`) gönderilir. Görsel Sahne Avcısı tarafından diske yazılmaz; dönen geçici önizleme adresleri de veritabanında saklanmaz.
+
+Federasyonu tamamen kapatmak için:
+
+```bash
+SAHNE_TRACE_MOE=0 sahne-avcisi
+```
+
+trace.moe kota sınırına (`402`) veya hız sınırına (`429`) takılırsa arama yine de yerel sonuçlarla döner; yalnızca `external_error` alanında ayrı, anlaşılır bir Türkçe uyarı gösterilir.
 
 Docker ile:
 
@@ -78,6 +97,34 @@ sahne-index ./ornek-video.mp4 \
 
 Yetişkinlere yönelik, yasal ve izinli bir içeriği indekslerken `--adult` bayrağı ayrıca verilmelidir.
 
+`--source-id` `config/sources.json` içinde tanımlı olmayan bir kaynağı gösteriyorsa indeksleme açık bir hata mesajıyla reddedilir. FFmpeg veya FFprobe kurulu değilse `FileNotFoundError` fırlatılır. Aynı `--source-url` ile tekrar indekslersen (bir video güncellendiğinde) eski kareler otomatik silinir ve yalnızca yeni kareler tek bir işlemde toplu yazılır.
+
+## Servisi internete açarken
+
+Varsayılanda API açıktır; yerel kullanım ve kendi sunucunda barındırma böyle
+basit kalıyor. Servisi kendi genel adresiyle yayına alıyorsan — örneğin FWT'nin
+arkasında bir Railway servisi olarak — iki ayarı vermelisin:
+
+```bash
+SAHNE_INTERNAL_TOKEN="uzun-rastgele-bir-deger"   # tüm /api uçları için zorunlu
+SAHNE_RATE_LIMIT=60                              # istemci başına istek (0 = kapalı)
+SAHNE_RATE_WINDOW=60                             # saniye cinsinden pencere
+```
+
+`SAHNE_INTERNAL_TOKEN` verildiğinde `/api/health` dışındaki bütün uçlar
+`X-Sahne-Internal-Token` başlığını ister; karşılaştırma `hmac.compare_digest`
+ile yapılır. `/api/health` açık kalır çünkü platformun sağlık yoklaması oradan
+geçer.
+
+**Dikkat:** token verildiğinde servisin kendi web arayüzü de çalışmaz, çünkü
+tarayıcı bu başlığı gönderemez. Bu bilinçli bir takas: servis, FWT'nin arkasında
+yalnızca arka uç olarak çalışır.
+
+Hız sınırı istemci IP'sine göre uygulanır. FWT gibi bir vekilin arkasındaysan
+bütün kullanıcılar tek IP'den göründüğü için sınır toplamda geçerli olur; FWT
+zaten kendi tarafında kullanıcı başına ayrıca sınırlıyor. Öntanımlı 60/dakika
+bunu göz önüne alarak seçildi.
+
 ## FMHY kaynak keşfi
 
 FMHY eşitlemesi yönetici anahtarı olmadan çalışmaz:
@@ -91,7 +138,7 @@ curl -X POST http://127.0.0.1:8080/api/sources/sync-fmhy \
   -d '{}'
 ```
 
-Keşfedilen kaynaklar otomatik etkinleştirilmez; `review-required` durumunda tutulur.
+Keşfedilen kaynaklar otomatik etkinleştirilmez; `review-required` durumunda tutulur. Bir kaynağı elle `active` yaptıktan sonra yeniden eşitleme bu kararı ezmez — katalog yalnızca keşfeder, etkinleştirme operatörde kalır.
 
 Sunucuyu açmadan komut satırından çalıştırmak için:
 
@@ -99,7 +146,32 @@ Sunucuyu açmadan komut satırından çalıştırmak için:
 sahne-sync-fmhy
 ```
 
-Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İndirme, torrent, canlı TV ve yardımcı durum/dokümantasyon bağlantıları sahne adaptörü kuyruğunun dışında tutulur.
+Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İndirme, torrent, canlı TV, Smart TV/uygulama listeleri ve yardımcı durum/dokümantasyon bağlantıları sahne adaptörü kuyruğunun dışında tutulur. IMDb/Letterboxd gibi izleme-veritabanı bağlantıları kayıt merkezinde `metadata` olarak saklanır; indeksleme kuyruğu bu türü kabul etmez.
+
+FMHY'nin yıldızla işaretlediği kaynaklar `fmhy-starred` etiketiyle daha yüksek önceliğe alınır, böylece inceleme kuyruğu topluluğun önerdiği kaynaklardan başlar.
+
+## İndeksi kamu malı filmlerle doldurma
+
+trace.moe anime tarafını hazır bir indeksle karşılar; film/dizi tarafında indeksi
+sen doldurursun. Internet Archive bunun için hazır bir kaynak olarak gelir:
+`feature_films` koleksiyonunda lisansı açıkça kamu malı olarak işaretlenmiş
+binlerce tam uzunlukta film var ve Archive programatik erişim için belgelenmiş
+bir API sunuyor.
+
+```bash
+# Varsayılan sorgu: kamu malı lisansı belirtilmiş uzun metraj filmler
+sahne-import-archive --limit 25
+
+# Kendi sorgunla
+sahne-import-archive --query 'collection:(prelinger) AND mediatype:(movies)' --limit 50
+```
+
+Komut yalnızca kuyruğa ekler; indirme ve kare çıkarma işini `sahne-worker` yapar.
+
+Adaptör her öğeyi indekslemez. `archive.org/metadata` yanıtında lisans alanı
+kamu malı veya Creative Commons göstermiyorsa öğe `blocked` olarak işaretlenir ve
+indirilmez — eksik lisans izin sayılmaz. Öğe video değilse veya boyut sınırını
+aşıyorsa yine aynı şekilde atlanır.
 
 ## Kaynak URL'sini indeksleme
 
@@ -122,7 +194,21 @@ Kuyruğu ayrı bir süreçte çalıştır:
 sahne-worker
 # Geliştirme veya zamanlanmış görev için yalnızca tek iş:
 sahne-worker --once
+# Toplu içe aktarma için eşzamanlı çalıştır:
+sahne-worker --concurrency 4 --per-host 4
+# Çökme sonrası 'running' durumunda takılı kalan işler için eşik (dakika, varsayılan 60):
+sahne-worker --stale-minutes 30
 ```
+
+`--concurrency` kaç işin aynı anda işleneceğini belirler (öntanımlı 1, yani
+sıralı). `--per-host` tek bir kaynak alan adına aynı anda açılacak en fazla
+aktarımı sınırlar (öntanımlı 2); toplu içe aktarmada işlerin çoğu aynı siteye
+gittiği için hızı pratikte bu sayı belirler. Makinedeki çekirdek sayısını aşmak
+işe yaramaz: kare çıkarma FFmpeg'de CPU'ya bağlıdır.
+
+Gerçek ölçüm (Archive.org'dan 6 kısa film, 4 çekirdekli makine): sıralı 34,9 sn;
+`--concurrency 3 --per-host 2` ile 21,0 sn; `--concurrency 4 --per-host 4` ile
+16,2 sn. Üç kurulumda da aynı 786 kare üretildi.
 
 Worker doğrudan MP4/WebM/MOV/M4V adreslerini, HTML sayfasındaki standart video metadatasını ve açık HLS VOD manifestlerini çözebilir. HLS akışı önce doğrulanır; yalnızca tamamlanmış, şifresiz, boyut/süre sınırları içindeki ve manifest alan adıyla aynı güven sınırındaki parçalar geçici bir yerel aynaya indirilir. Canlı, DRM/şifreli, düşük gecikmeli veya farklı alan adına parça taşıyan manifestler reddedilir. FFmpeg bu aynayı yalnızca `file,data` protokolleriyle okur. Üçüncü taraf iframe için hâlâ kaynağa özel ve izinli adaptör gerekir. İndirilen medya kare parmak izleri çıkarılınca geçici dizinle birlikte silinir.
 
@@ -131,6 +217,8 @@ HLS sınırları worker seçenekleriyle ayarlanabilir:
 ```bash
 sahne-worker --max-video-mb 1024 --max-hls-hours 4
 ```
+
+Worker her başlangıçta `--stale-minutes` süresinden uzun süredir `running` durumunda kalan işleri (ör. worker çökmesi sonrası) otomatik olarak yeniden kuyruğa alır. Beklenmeyen bir hata oluşursa iş sessizce takılı kalmaz; `failed` durumuna alınır ve hata mesajı kaydedilir.
 
 ## API
 
@@ -149,13 +237,12 @@ sahne-worker --max-video-mb 1024 --max-hls-hours 4
 
 ## Yol haritası
 
-1. Sahne değişimi tabanlı akıllı kare örnekleme
-2. OpenCLIP/SigLIP embedding ve pgvector/Qdrant araması
-3. Altyazı, filigran ve oynatıcı arayüzü maskeleme
-4. JustWatch/TMDB metadata zenginleştirme
-5. Ortak iframe oynatıcı ve kaynağa özel adaptörler
-6. Kaynak sağlık kontrolleri ve takılı iş kurtarma
-7. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
+1. OpenCLIP/SigLIP embedding ve pgvector/Qdrant araması
+2. Altyazı, filigran ve oynatıcı arayüzü maskeleme
+3. JustWatch/TMDB metadata zenginleştirme
+4. Ortak iframe oynatıcı ve kaynağa özel adaptörler
+5. Kaynak sağlık kontrolleri ve takılı iş kurtarma
+6. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
 
 Detaylı tasarım için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasına bakın.
 
