@@ -500,13 +500,15 @@ class Database:
     def apply_catalog_snapshot(self, run_id: int, catalog_id: str, sources: list[dict]) -> dict[str, int]:
         counts = {"discovered": len(sources), "created": 0, "updated": 0, "missing": 0, "restored": 0}
         seen_ids = {source["id"] for source in sources}
+        # "status" is deliberately absent: the catalog only ever proposes
+        # "review-required", so re-syncing must not undo an operator's decision
+        # to activate or block a source.
         tracked_fields = (
             "name",
             "base_url",
             "kind",
             "category",
             "adult",
-            "status",
             "priority",
             "notes",
             "section",
@@ -555,7 +557,7 @@ class Database:
                     )
                     ON CONFLICT(id) DO UPDATE SET
                         name=excluded.name, base_url=excluded.base_url, kind=excluded.kind,
-                        category=excluded.category, adult=excluded.adult, status=excluded.status,
+                        category=excluded.category, adult=excluded.adult,
                         priority=excluded.priority, notes=excluded.notes, section=excluded.section,
                         tags_json=excluded.tags_json,
                         discovered_from=COALESCE(sources.discovered_from, excluded.discovered_from),

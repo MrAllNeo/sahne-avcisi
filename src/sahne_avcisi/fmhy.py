@@ -50,12 +50,14 @@ class CatalogLink:
     section: str
     subsection: str
     context: str = ""
+    starred: bool = False
 
 
 @dataclass
 class _ListItem:
     text: list[str] = field(default_factory=list)
     links: list[tuple[str, str]] = field(default_factory=list)
+    starred: bool = False
 
 
 class CatalogParser(HTMLParser):
@@ -76,7 +78,11 @@ class CatalogParser(HTMLParser):
             self._heading_tag = tag
             self._heading_text = []
         elif tag == "li":
-            self._list_item = _ListItem()
+            self._list_item = _ListItem(starred=_has_star_class(attrs))
+        elif tag == "span":
+            # FMHY renders the star as an icon-only <span> inside the <li>.
+            if self._list_item is not None and _has_star_class(attrs):
+                self._list_item.starred = True
         elif tag == "a":
             self._anchor_href = dict(attrs).get("href")
             self._anchor_text = []
@@ -111,7 +117,12 @@ class CatalogParser(HTMLParser):
         elif tag == "li" and self._list_item is not None:
             context = _clean_text(" ".join(self._list_item.text))
             for href, label in self._list_item.links:
-                self.links.append(CatalogLink(href, label, self.section, self.subsection, context))
+                self.links.append(
+                    CatalogLink(
+                        href, label, self.section, self.subsection, context,
+                        starred=self._list_item.starred,
+                    )
+                )
             self._list_item = None
 
 
@@ -119,19 +130,55 @@ def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip(" -|•\u200b")
 
 
+STAR_CLASSES = ("starred", "i-twemoji-glowing-star", "i-twemoji-star")
+
+# FMHY stopped emitting a literal star emoji when it moved to icon fonts, but
+# the markdown source and older mirrors still carry one.
+STAR_EMOJI = ("\U0001f31f", "⭐")
+
+
+def _has_star_class(attrs: list[tuple[str, str | None]]) -> bool:
+    classes = (dict(attrs).get("class") or "").split()
+    return any(name in STAR_CLASSES for name in classes)
+
+
 def _catalog_id(feed_url: str) -> str:
     return "fmhy-" + hashlib.sha256(feed_url.encode("utf-8")).hexdigest()[:12]
 
 
-def _is_relevant_section(section: str) -> bool:
+# Sections that never yield a fingerprintable video page.
+SKIP_SECTION_PHRASES = (
+    "download",
+    "torrent",
+    "subtitle",
+    "live tv",
+    "live sports",
+    "sports streaming",
+    "smart tv",
+    "base64",
+)
+SKIP_SECTION_WORDS = frozenset({"app", "apps", "tool", "tools", "wiki", "more"})
+
+# Sections that list reference databases rather than players. They stay in the
+# registry as metadata, which enqueue_index_job already refuses to index.
+METADATA_SECTION_PHRASES = ("tracking", "database")
+
+
+def _section_disposition(section: str) -> str:
+    """Classify a catalog section as 'video', 'metadata' or 'skip'."""
     normalized = section.casefold()
     if not normalized:
-        return True
-    blocked = ("download", "torrent", "subtitle", "live tv", "live sports", "sports streaming")
-    return not any(token in normalized for token in blocked)
+        return "video"
+    if any(phrase in normalized for phrase in SKIP_SECTION_PHRASES):
+        return "skip"
+    if set(re.findall(r"[a-z0-9]+", normalized)) & SKIP_SECTION_WORDS:
+        return "skip"
+    if any(phrase in normalized for phrase in METADATA_SECTION_PHRASES):
+        return "metadata"
+    return "video"
 
 
-def _classify(link: CatalogLink) -> tuple[str, str, bool, list[str], int]:
+def _classify(link: CatalogLink, disposition: str = "video") -> tuple[str, str, bool, list[str], int]:
     context = " ".join((link.section, link.subsection, link.context, link.label)).casefold()
     adult = any(token in context for token in ("nsfw", "adult", "porn", "hentai", "rule34"))
 
@@ -145,13 +192,15 @@ def _classify(link: CatalogLink) -> tuple[str, str, bool, list[str], int]:
         category = "mixed"
     elif has_anime:
         category = "anime"
-    elif has_movie:
-        category = "movie-tv"
     else:
-        category = "mixed"
+        # No anime signal anywhere in the entry: FMHY's video sections are
+        # film/series by default, so "mixed" stays reserved for genuine overlap.
+        category = "movie-tv"
 
     subsection = link.subsection.casefold()
-    if "free w/ ads" in subsection or "free with ads" in subsection:
+    if disposition == "metadata":
+        kind = "metadata"
+    elif "free w/ ads" in subsection or "free with ads" in subsection:
         kind = "official-stream"
     elif "multi-server" in subsection:
         kind = "multi-server"
@@ -174,10 +223,13 @@ def _classify(link: CatalogLink) -> tuple[str, str, bool, list[str], int]:
     ):
         if token in context:
             tags.append(tag)
-    if "🌟" in link.context:
+    if link.starred or any(emoji in link.context for emoji in STAR_EMOJI):
         tags.append("fmhy-starred")
 
-    priority = 62 + (18 if "fmhy-starred" in tags else 0)
+    if disposition == "metadata":
+        priority = 40
+    else:
+        priority = 62 + (18 if "fmhy-starred" in tags else 0)
     return kind, category, adult, tags, priority
 
 
@@ -188,7 +240,8 @@ def discover_links(html: str, feed_url: str) -> list[dict]:
     discovered: dict[str, dict] = {}
 
     for link in parser.links:
-        if not _is_relevant_section(link.section):
+        disposition = _section_disposition(link.section)
+        if disposition == "skip":
             continue
         absolute = urljoin(feed_url, link.href)
         parsed = urlparse(absolute)
@@ -201,7 +254,7 @@ def discover_links(html: str, feed_url: str) -> list[dict]:
         if label_key in AUXILIARY_LABELS:
             continue
 
-        kind, category, adult, tags, priority = _classify(link)
+        kind, category, adult, tags, priority = _classify(link, disposition)
         source_id = "fmhy-site-" + hashlib.sha256(host.encode("utf-8")).hexdigest()[:12]
         name = link.label
         if not name or name.isdigit() or len(name) <= 2:

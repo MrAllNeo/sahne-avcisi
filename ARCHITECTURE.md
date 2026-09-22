@@ -36,7 +36,9 @@ Kaynak durumları:
 - `legal-review`: kullanım hakkı açıklığa kavuşmadan işlenmez.
 - `disabled`: kapalı veya bilinçli olarak devre dışı.
 
-FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi özellikler etiketlenir. İndirme, torrent, canlı TV, durum sayfası ve yardımcı dokümantasyon bağlantıları adaptör kuyruğuna alınmaz.
+FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi özellikler etiketlenir. İndirme, torrent, canlı TV, Smart TV/uygulama listeleri, durum sayfası ve yardımcı dokümantasyon bağlantıları adaptör kuyruğuna alınmaz. İzleme/veritabanı bölümleri `metadata` türüyle kaydedilir; `enqueue_index_job` bu türü zaten reddeder.
+
+Durum alanı yalnızca operatöre aittir: katalog eşitlemesi yeni kaynağı `review-required` ile oluşturur, ancak var olan bir kaydın durumunu güncellemez. Böylece tekrarlanan eşitlemeler elle verilmiş `active`/`disabled` kararlarını geri almaz.
 
 ### Kaynak adaptörü sözleşmesi
 

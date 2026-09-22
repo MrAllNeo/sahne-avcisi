@@ -91,7 +91,7 @@ curl -X POST http://127.0.0.1:8080/api/sources/sync-fmhy \
   -d '{}'
 ```
 
-Keşfedilen kaynaklar otomatik etkinleştirilmez; `review-required` durumunda tutulur.
+Keşfedilen kaynaklar otomatik etkinleştirilmez; `review-required` durumunda tutulur. Bir kaynağı elle `active` yaptıktan sonra yeniden eşitleme bu kararı ezmez — katalog yalnızca keşfeder, etkinleştirme operatörde kalır.
 
 Sunucuyu açmadan komut satırından çalıştırmak için:
 
@@ -99,7 +99,9 @@ Sunucuyu açmadan komut satırından çalıştırmak için:
 sahne-sync-fmhy
 ```
 
-Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İndirme, torrent, canlı TV ve yardımcı durum/dokümantasyon bağlantıları sahne adaptörü kuyruğunun dışında tutulur.
+Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İndirme, torrent, canlı TV, Smart TV/uygulama listeleri ve yardımcı durum/dokümantasyon bağlantıları sahne adaptörü kuyruğunun dışında tutulur. IMDb/Letterboxd gibi izleme-veritabanı bağlantıları kayıt merkezinde `metadata` olarak saklanır; indeksleme kuyruğu bu türü kabul etmez.
+
+FMHY'nin yıldızla işaretlediği kaynaklar `fmhy-starred` etiketiyle daha yüksek önceliğe alınır, böylece inceleme kuyruğu topluluğun önerdiği kaynaklardan başlar.
 
 ## Kaynak URL'sini indeksleme
 
