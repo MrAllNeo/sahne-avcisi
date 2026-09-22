@@ -21,7 +21,8 @@ SOURCE = {
 
 
 def fp(dhash: str, ahash: str) -> Fingerprint:
-    return Fingerprint(dhash=dhash, ahash=ahash, width=320, height=180)
+    """Build a fingerprint from hex text; hashes are stored as 64-bit integers."""
+    return Fingerprint(dhash=int(dhash, 16), ahash=int(ahash, 16), width=320, height=180)
 
 
 class DatabaseTests(unittest.TestCase):
@@ -87,7 +88,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["timestamp_ms"], 2000)
 
-    def test_search_cache_is_reused_without_recomputation(self) -> None:
+    def test_frame_index_is_reused_between_searches(self) -> None:
         media_id = self.database.create_media(
             source_id=SOURCE["id"],
             title="Film",
@@ -98,9 +99,9 @@ class DatabaseTests(unittest.TestCase):
         self.database.replace_frames(media_id, [(0, fp("0" * 16, "0" * 16))])
         query = fp("0" * 16, "0" * 16)
         self.database.search(query, allow_adult=False)
-        cache_object_before = self.database._frame_cache
+        index_before = self.database._frame_index_cache
         self.database.search(query, allow_adult=False)
-        self.assertIs(self.database._frame_cache, cache_object_before)
+        self.assertIs(self.database._frame_index_cache, index_before)
 
     def test_replace_frames_deletes_old_frames_on_reindex(self) -> None:
         media_id = self.database.create_media(
@@ -127,7 +128,7 @@ class DatabaseTests(unittest.TestCase):
                 "SELECT timestamp_ms, dhash FROM frames WHERE media_id=?", (media_id,)
             ).fetchall()
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["dhash"], "1" * 16)
+        self.assertEqual(rows[0]["dhash"], int("1" * 16, 16))
 
     def test_replace_frames_is_single_transaction_bulk_write(self) -> None:
         media_id = self.database.create_media(

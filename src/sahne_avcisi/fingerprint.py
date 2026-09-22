@@ -12,10 +12,19 @@ class InvalidImageError(ValueError):
 
 @dataclass(frozen=True)
 class Fingerprint:
-    dhash: str
-    ahash: str
+    dhash: int
+    ahash: int
     width: int
     height: int
+
+
+def to_signed64(value: int) -> int:
+    """Reinterpret an unsigned 64-bit hash as signed, for SQLite INTEGER."""
+    return value - (1 << 64) if value >= (1 << 63) else value
+
+
+def to_unsigned64(value: int) -> int:
+    return value + (1 << 64) if value < 0 else value
 
 
 def _open_image(data: bytes) -> Image.Image:
@@ -77,17 +86,17 @@ def fingerprint_bytes(data: bytes) -> Fingerprint:
     width, height = image.size
     normalized = _trim_near_black_borders(image)
     return Fingerprint(
-        dhash=f"{_difference_hash(normalized):016x}",
-        ahash=f"{_average_hash(normalized):016x}",
+        dhash=_difference_hash(normalized),
+        ahash=_average_hash(normalized),
         width=width,
         height=height,
     )
 
 
-def hamming_distance(left: str, right: str) -> int:
-    return (int(left, 16) ^ int(right, 16)).bit_count()
+def hamming_distance(left: int, right: int) -> int:
+    return (left ^ right).bit_count()
 
 
-def similarity(query: Fingerprint, candidate_dhash: str, candidate_ahash: str) -> float:
+def similarity(query: Fingerprint, candidate_dhash: int, candidate_ahash: int) -> float:
     distance = hamming_distance(query.dhash, candidate_dhash) + hamming_distance(query.ahash, candidate_ahash)
     return max(0.0, 1.0 - distance / 128.0)

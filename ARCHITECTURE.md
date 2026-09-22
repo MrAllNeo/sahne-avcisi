@@ -52,7 +52,13 @@ class AdapterResult:
     indexable: bool
 ```
 
-Genel adaptör doğrudan video, Open Graph video ve HTML5 `video/source` elemanlarını indeksleyebilir. HLS ile iframe oynatıcılar yalnızca tespit edilir ve `blocked` durumuna alınır; otomatik takip edilmez. Adaptör DRM, oturum, ödeme duvarı, CAPTCHA veya başka bir erişim kontrolünü aşmamalıdır.
+Genel adaptör doğrudan video, Open Graph video ve HTML5 `video/source` elemanlarını indeksleyebilir. Açık HLS VOD manifestleri güvenli yerel aynaya alınarak indekslenir; iframe oynatıcılar yalnızca tespit edilir ve `blocked` durumuna alınır. Adaptör DRM, oturum, ödeme duvarı, CAPTCHA veya başka bir erişim kontrolünü aşmamalıdır.
+
+### HLS güvenli aynası
+
+`HlsMirror`, ana manifestten hedefe en yakın 480p varyantı seçer ve medya manifestini ayrıştırır. Yalnızca `#EXT-X-ENDLIST` içeren tamamlanmış VOD akışları kabul edilir. Canlı/düşük gecikmeli akışlar, şifre anahtarları, desteklenmeyen URI etiketleri, aşırı süre/parça sayısı ve manifest güven alanı dışındaki parçalar reddedilir.
+
+Manifest ve parçalar geçici dizine yerel adlarla yazılır; uzak URL'ler yeniden yazılan manifestte bulunmaz. FFprobe ve FFmpeg HLS girdisinde `file,data` protokol izin listesiyle çalışır. Böylece ayrıştırıcıya ulaşabilecek bir uzak URI ikinci bir ağ isteği başlatamaz.
 
 ### İndeksleme işleri
 
@@ -101,7 +107,30 @@ Dönen sonuçlar yerel sonuç modeliyle birleştirilir. AniList başlığı, bö
 
 ## Ölçekleme planı
 
-MVP SQLite üzerinde bütün kareleri uygulama belleğinde puanlar. Büyük katalog için bu yaklaşım değiştirilmelidir:
+## Arama performansı
+
+Hash'ler `frames` tablosunda 64-bit `INTEGER` olarak saklanır ve bellekte
+bitişik `uint64` dizileri hâlinde tutulur; puanlama numpy ile vektörleştirilmiş
+tek bir XOR + popcount geçişidir. Önbellek, kare sayısı veya en büyük kare
+kimliği değiştiğinde yeniden kurulur.
+
+Daha önce hash'ler `TEXT` idi ve her karşılaştırmada hex parse ediliyordu; bu,
+arama süresinin neredeyse tamamını oluşturuyordu. 200 bin karede ölçülen fark:
+
+| Yaklaşım | Arama | Kalıcı RAM |
+|---|---|---|
+| Hex metin, satır satır puanlama | 5.092 ms | — |
+| INTEGER + numpy vektör | **1,92 ms** | 51 bayt/kare |
+
+Bu ölçekte tarama O(n) kalır ama bellek bant genişliğinde çalışır: 20,7 milyon
+kare (tüm kamu malı arşivi) yaklaşık 199 ms ve 830 MB'a denk gelir.
+
+LSH veya BK-tree denenmedi çünkü varsayılan eşik olan 0,55 benzerlik 128 bitte
+57 bitlik farka izin verir; bu mesafede güvercin yuvası prensibi tutmaz ve
+hiçbir bucket şeması aday sayısını anlamlı biçimde azaltmaz. Eşik belirgin
+şekilde sıkılaştırılırsa bu yapılar yeniden gündeme gelebilir.
+
+Bundan sonraki ölçek adımı için:
 
 - Metadata: PostgreSQL
 - Vektörler: pgvector veya Qdrant
