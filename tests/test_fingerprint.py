@@ -1,9 +1,11 @@
 import unittest
 from io import BytesIO
+from unittest.mock import patch
 
 from PIL import Image, ImageDraw
 
 from sahne_avcisi.fingerprint import (
+    _flattened_pixels,
     fingerprint_bytes,
     hamming_distance,
     similarity,
@@ -50,6 +52,22 @@ class FingerprintTests(unittest.TestCase):
         first = fingerprint_bytes(make_image())
         second = fingerprint_bytes(make_image(invert=True))
         self.assertLess(similarity(first, second.dhash, second.ahash), 1.0)
+
+    def test_flattened_pixels_uses_getdata_when_get_flattened_data_missing(self) -> None:
+        image = Image.new("L", (2, 2), 10)
+        with patch.object(Image.Image, "get_flattened_data", None, create=True):
+            pixels = _flattened_pixels(image)
+        self.assertEqual(pixels, [10, 10, 10, 10])
+
+    def test_flattened_pixels_prefers_get_flattened_data_when_present(self) -> None:
+        image = Image.new("L", (2, 2), 5)
+        pixels = _flattened_pixels(image)
+        self.assertEqual(pixels, list(image.getdata()))
+
+    def test_fingerprint_bytes_works_without_get_flattened_data(self) -> None:
+        with patch.object(Image.Image, "get_flattened_data", None, create=True):
+            fingerprint = fingerprint_bytes(make_image())
+        self.assertEqual(fingerprint, fingerprint_bytes(make_image()))
 
 
 if __name__ == "__main__":

@@ -197,10 +197,10 @@ class Database:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
-        # Without this, a second writer fails instantly with "database is
-        # locked" instead of waiting its turn, which rules out running more
-        # than one indexing worker.
+        # The sqlite3 default of five seconds is short for a bulk import, where
+        # a writer can be mid-transaction over a whole film's frames.
         connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        connection.execute("PRAGMA foreign_keys=ON")
         try:
             yield connection
             connection.commit()
@@ -298,26 +298,26 @@ class Database:
             ).fetchone()
             return int(row["id"])
 
-    def add_frame(self, media_id: int, timestamp_ms: int, fingerprint: Fingerprint) -> None:
+    def replace_frames(self, media_id: int, frames: list[tuple[int, Fingerprint]]) -> None:
+        """Replace all frames for a media in one transaction (used on (re)indexing)."""
         with self.connect() as connection:
-            connection.execute(
+            connection.execute("DELETE FROM frames WHERE media_id=?", (media_id,))
+            connection.executemany(
                 """
                 INSERT INTO frames (media_id, timestamp_ms, dhash, ahash, width, height)
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(media_id, timestamp_ms) DO UPDATE SET
-                    dhash=excluded.dhash,
-                    ahash=excluded.ahash,
-                    width=excluded.width,
-                    height=excluded.height
                 """,
-                (
-                    media_id,
-                    timestamp_ms,
-                    to_signed64(fingerprint.dhash),
-                    to_signed64(fingerprint.ahash),
-                    fingerprint.width,
-                    fingerprint.height,
-                ),
+                [
+                    (
+                        media_id,
+                        timestamp_ms,
+                        to_signed64(fingerprint.dhash),
+                        to_signed64(fingerprint.ahash),
+                        fingerprint.width,
+                        fingerprint.height,
+                    )
+                    for timestamp_ms, fingerprint in frames
+                ],
             )
 
     def _frame_index(self) -> dict:
@@ -394,16 +394,21 @@ class Database:
         candidates = np.flatnonzero(distance <= max_distance)
         if not candidates.size:
             return []
-        # Only the best few are ever returned, so rank that slice rather than
-        # sorting every candidate.
-        if candidates.size > limit:
-            keep = np.argpartition(distance[candidates], limit)[:limit]
-            candidates = candidates[keep]
+        # Every candidate has to stay in play until the dedup below: a single
+        # video can hold the closest thousand frames, so trimming to `limit`
+        # first would leave no room for the other videos that should surface.
         candidates = candidates[np.argsort(distance[candidates], kind="stable")]
 
         results = []
+        seen_media: set[int] = set()
         for position in candidates:
-            media = index["media"][int(index["media_id"][position])]
+            media_id = int(index["media_id"][position])
+            # A static scene matches many timestamps of the same video; keep
+            # only its strongest frame so distinct videos get the other slots.
+            if media_id in seen_media:
+                continue
+            seen_media.add(media_id)
+            media = index["media"][media_id]
             timestamp_ms = int(index["timestamp_ms"][position])
             results.append(
                 {
@@ -418,6 +423,8 @@ class Database:
                     "similarity": round((1.0 - int(distance[position]) / 128.0) * 100, 2),
                 }
             )
+            if len(results) == limit:
+                break
         return results
 
     def stats(self) -> dict:
@@ -484,6 +491,21 @@ class Database:
                 "SELECT * FROM index_jobs WHERE source_id=? AND page_url=?", (source_id, page_url)
             ).fetchone()
         return dict(row)
+
+    def requeue_stale_jobs(self, stale_minutes: float) -> int:
+        """Requeue jobs stuck in 'running' longer than stale_minutes (e.g. after a crashed worker)."""
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE index_jobs
+                SET status='queued', started_at=NULL, updated_at=CURRENT_TIMESTAMP
+                WHERE status='running'
+                  AND started_at IS NOT NULL
+                  AND started_at <= datetime('now', ?)
+                """,
+                (f"-{max(0, int(stale_minutes))} minutes",),
+            )
+            return cursor.rowcount
 
     def claim_index_job(self) -> dict | None:
         with self.connect() as connection:

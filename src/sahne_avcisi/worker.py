@@ -84,6 +84,9 @@ class IndexWorker:
         except (AdapterError, OSError, ValueError, subprocess.SubprocessError) as exc:
             self.database.stop_index_job(job["id"], status="failed", error=str(exc))
             return {"job_id": job["id"], "status": "failed", "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - never leave a job stuck in "running"
+            self.database.stop_index_job(job["id"], status="failed", error=f"Beklenmeyen hata: {exc}")
+            return {"job_id": job["id"], "status": "failed", "error": str(exc)}
 
     def _process(self, job: dict, source: dict) -> dict:
         resolved = self.registry.resolve(source, job["page_url"])
@@ -200,10 +203,19 @@ def main() -> None:
         default=2,
         help="Tek bir kaynak alan adına aynı anda açılacak en fazla aktarım.",
     )
+    parser.add_argument(
+        "--stale-minutes",
+        type=int,
+        default=60,
+        help="Bu süreden uzun süredir 'running' kalan işleri başlangıçta yeniden kuyruğa al.",
+    )
     args = parser.parse_args()
 
     database = Database(args.database)
     load_seed_sources(database, args.sources)
+    requeued = database.requeue_stale_jobs(args.stale_minutes)
+    if requeued:
+        print(f"{requeued} takılı kalmış iş yeniden kuyruğa alındı.", flush=True)
     limiter = HostLimiter(args.per_host)
     concurrency = max(1, min(args.concurrency, 16))
 

@@ -19,6 +19,7 @@ class SearchTestCase(unittest.TestCase):
         self._directory = tempfile.TemporaryDirectory()
         self.addCleanup(self._directory.cleanup)
         self.database = Database(Path(self._directory.name) / "search.sqlite3")
+        self._frames: dict[int, list] = {}
 
     def add_source(self, source_id: str, *, adult: bool = False, category: str = "movie-tv") -> None:
         self.database.upsert_source(
@@ -46,9 +47,10 @@ class SearchTestCase(unittest.TestCase):
         )
 
     def add_frame(self, media_id: int, timestamp_ms: int, dhash: int, ahash: int) -> None:
-        self.database.add_frame(
-            media_id, timestamp_ms, Fingerprint(dhash=dhash, ahash=ahash, width=480, height=270)
-        )
+        # replace_frames rewrites a whole media, so keep the running set per media.
+        frames = self._frames.setdefault(media_id, [])
+        frames.append((timestamp_ms, Fingerprint(dhash=dhash, ahash=ahash, width=480, height=270)))
+        self.database.replace_frames(media_id, frames)
 
     def query(self, dhash: int, ahash: int, **kwargs):
         kwargs.setdefault("allow_adult", False)
@@ -62,14 +64,26 @@ class RankingTests(SearchTestCase):
     def test_closest_frame_ranks_first_and_scores_100(self) -> None:
         self.add_source("s")
         media = self.add_media("s", "Film")
+        other = self.add_media("s", "Other")
         self.add_frame(media, 1000, BASE, BASE)
-        self.add_frame(media, 2000, flip(BASE, 8), flip(BASE, 8))
+        self.add_frame(other, 2000, flip(BASE, 8), flip(BASE, 8))
 
         results = self.query(BASE, BASE)
         self.assertEqual(results[0]["timestamp_ms"], 1000)
         self.assertEqual(results[0]["similarity"], 100.0)
         self.assertEqual(results[0]["title"], "Film")
         self.assertGreater(results[0]["similarity"], results[1]["similarity"])
+
+    def test_only_the_strongest_frame_of_a_video_is_returned(self) -> None:
+        self.add_source("s")
+        media = self.add_media("s", "Film")
+        self.add_frame(media, 1000, flip(BASE, 8), BASE)
+        self.add_frame(media, 2000, BASE, BASE)
+        self.add_frame(media, 3000, flip(BASE, 4), BASE)
+
+        results = self.query(BASE, BASE)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["timestamp_ms"], 2000)
 
     def test_results_are_ordered_by_similarity(self) -> None:
         self.add_source("s")
@@ -82,9 +96,9 @@ class RankingTests(SearchTestCase):
 
     def test_limit_caps_the_result_count(self) -> None:
         self.add_source("s")
-        media = self.add_media("s", "Film")
         for index in range(10):
-            self.add_frame(media, index * 1000, BASE, BASE)
+            media = self.add_media("s", f"Film {index}")
+            self.add_frame(media, 1000, BASE, BASE)
         self.assertEqual(len(self.query(BASE, BASE, limit=3)), 3)
 
     def test_frames_below_the_threshold_are_dropped(self) -> None:
@@ -128,10 +142,11 @@ class IndexFreshnessTests(SearchTestCase):
         self.add_frame(media, 1000, flip(BASE, 10), BASE)
         self.assertEqual(len(self.query(BASE, BASE)), 1)
 
-        self.add_frame(media, 2000, BASE, BASE)
+        later = self.add_media("s", "Later Film")
+        self.add_frame(later, 2000, BASE, BASE)
         results = self.query(BASE, BASE)
         self.assertEqual(len(results), 2)
-        self.assertEqual(results[0]["timestamp_ms"], 2000)
+        self.assertEqual(results[0]["title"], "Later Film")
 
 
 class LegacySchemaMigrationTests(SearchTestCase):

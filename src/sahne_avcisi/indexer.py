@@ -29,6 +29,8 @@ def _input_options(media_file: Path) -> list[str]:
 
 
 def probe_duration_ms(media_file: Path) -> int | None:
+    if not shutil.which("ffprobe"):
+        raise FileNotFoundError("FFprobe bulunamadı. Lütfen FFmpeg paketini (ffprobe dahil) kurun.")
     command = [
         "ffprobe",
         "-v",
@@ -47,7 +49,7 @@ def probe_duration_ms(media_file: Path) -> int | None:
 
 def extract_frames(media_file: Path, output_dir: Path, interval_seconds: float) -> list[Path]:
     if not shutil.which("ffmpeg"):
-        raise RuntimeError("FFmpeg bulunamadı.")
+        raise FileNotFoundError("FFmpeg bulunamadı. Lütfen FFmpeg paketini kurun.")
     pattern = output_dir / "frame-%08d.jpg"
     command = [
         "ffmpeg",
@@ -143,9 +145,13 @@ def index_stream(
             episode=episode,
             duration_ms=duration_ms,
         )
-        for index, frame in enumerate(frames):
-            fingerprint = fingerprint_bytes(frame.read_bytes())
-            database.add_frame(media_id, int(index * interval_seconds * 1000), fingerprint)
+        database.replace_frames(
+            media_id,
+            [
+                (int(index * interval_seconds * 1000), fingerprint_bytes(frame.read_bytes()))
+                for index, frame in enumerate(frames)
+            ],
+        )
     return {"media_id": media_id, "frames": len(frames), "duration_ms": duration_ms}
 
 
@@ -161,6 +167,8 @@ def index_local_video(
     episode: str | None,
     interval_seconds: float,
 ) -> dict:
+    if database.get_source(source_id) is None:
+        raise ValueError(f"Kaynak bulunamadı: {source_id!r}. Önce kaynağı config/sources.json içinde tanımlayın.")
     if not media_file.is_file():
         raise FileNotFoundError(media_file)
     duration_ms = probe_duration_ms(media_file)
@@ -175,9 +183,11 @@ def index_local_video(
     )
     with tempfile.TemporaryDirectory(prefix="sahne-frames-") as temp_dir:
         frames = extract_frames(media_file, Path(temp_dir), interval_seconds)
-        for index, frame in enumerate(frames):
-            fingerprint = fingerprint_bytes(frame.read_bytes())
-            database.add_frame(media_id, int(index * interval_seconds * 1000), fingerprint)
+        fingerprints = [
+            (int(index * interval_seconds * 1000), fingerprint_bytes(frame.read_bytes()))
+            for index, frame in enumerate(frames)
+        ]
+        database.replace_frames(media_id, fingerprints)
     return {"media_id": media_id, "frames": len(frames), "duration_ms": duration_ms}
 
 

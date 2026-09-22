@@ -26,11 +26,19 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Internet Archive kamu malı film arşivinden toplu indeks doldurma
 - Archive.org öğelerinde lisans doğrulaması; lisansı belirtilmemiş öğeleri indekslememe
 - Açık kullanıcı onayıyla trace.moe canlı anime sahne araması
+- Yerel indekste zaten güçlü bir eşleşme (%90 üzeri) varsa trace.moe'ye sorulmaz; kota sadece gerektiğinde harcanır
+- `SAHNE_TRACE_MOE=0` ile trace.moe federasyonunu tamamen kapatma
 - AniList başlığı, bölüm, zaman kodu, benzerlik ve kısa sahne önizlemesi
 - trace.moe sonuçlarında 18+ içeriği sunucu tarafında ayrıca filtreleme
+- trace.moe kota (402) ve hız sınırı (429) hataları için ayrı, anlaşılır Türkçe uyarılar
 - Servis token'ı ile korunabilen API ve arama ucunda istemci başına hız sınırı
-- Yönetici anahtarıyla korunan FMHY eşitleme uç noktası
+- Yönetici anahtarıyla korunan FMHY eşitleme uç noktası; anahtar karşılaştırması zamanlama saldırılarına karşı `hmac.compare_digest` ile yapılır
 - Yetişkin kaynaklarını varsayılan olarak gizleme ve 18+ onayı
+- Parmak izleri 64-bit tamsayı olarak saklanır ve bellekte bitişik dizilerde tutulur; sahne araması numpy ile vektörleştirilmiş tek geçişte puanlanır (indeks değiştiğinde otomatik yenilenir)
+- Kare yazımı tek işlemde toplu yapılır; bir video yeniden indekslenirse eski kareleri otomatik siler
+- Var olmayan bir kaynak kimliğiyle indeksleme denemesi açık bir hata mesajıyla reddedilir
+- FFmpeg/FFprobe kurulu değilse net bir hata ile durur
+- Takılı kalan indeksleme işleri worker başlangıcında otomatik yeniden kuyruğa alınır
 - Docker ile çalıştırma
 
 ## Hızlı başlangıç
@@ -56,7 +64,15 @@ trace.moe misafir kotasıyla anahtarsız kullanılabilir. Bir API anahtarınız 
 TRACE_MOE_API_KEY="anahtar" sahne-avcisi
 ```
 
-trace.moe seçeneği arayüzde varsayılan olarak kapalıdır. Kullanıcı açtığında ekran görüntüsü anime eşleştirmesi için üçüncü taraf trace.moe API'sine gönderilir. Görsel Sahne Avcısı tarafından diske yazılmaz; dönen geçici önizleme adresleri de veritabanında saklanmaz.
+trace.moe seçeneği arayüzde varsayılan olarak kapalıdır. Kullanıcı açtığında, kategori `all` ya da `anime` ise ve yerel indekste zaten %90 üzeri bir eşleşme yoksa, ekran görüntüsü anime eşleştirmesi için üçüncü taraf trace.moe API'sine (`POST https://api.trace.moe/search?anilistInfo&cutBorders=2`) gönderilir. Görsel Sahne Avcısı tarafından diske yazılmaz; dönen geçici önizleme adresleri de veritabanında saklanmaz.
+
+Federasyonu tamamen kapatmak için:
+
+```bash
+SAHNE_TRACE_MOE=0 sahne-avcisi
+```
+
+trace.moe kota sınırına (`402`) veya hız sınırına (`429`) takılırsa arama yine de yerel sonuçlarla döner; yalnızca `external_error` alanında ayrı, anlaşılır bir Türkçe uyarı gösterilir.
 
 Docker ile:
 
@@ -80,6 +96,8 @@ sahne-index ./ornek-video.mp4 \
 ```
 
 Yetişkinlere yönelik, yasal ve izinli bir içeriği indekslerken `--adult` bayrağı ayrıca verilmelidir.
+
+`--source-id` `config/sources.json` içinde tanımlı olmayan bir kaynağı gösteriyorsa indeksleme açık bir hata mesajıyla reddedilir. FFmpeg veya FFprobe kurulu değilse `FileNotFoundError` fırlatılır. Aynı `--source-url` ile tekrar indekslersen (bir video güncellendiğinde) eski kareler otomatik silinir ve yalnızca yeni kareler tek bir işlemde toplu yazılır.
 
 ## Servisi internete açarken
 
@@ -178,6 +196,8 @@ sahne-worker
 sahne-worker --once
 # Toplu içe aktarma için eşzamanlı çalıştır:
 sahne-worker --concurrency 4 --per-host 4
+# Çökme sonrası 'running' durumunda takılı kalan işler için eşik (dakika, varsayılan 60):
+sahne-worker --stale-minutes 30
 ```
 
 `--concurrency` kaç işin aynı anda işleneceğini belirler (öntanımlı 1, yani
@@ -197,6 +217,8 @@ HLS sınırları worker seçenekleriyle ayarlanabilir:
 ```bash
 sahne-worker --max-video-mb 1024 --max-hls-hours 4
 ```
+
+Worker her başlangıçta `--stale-minutes` süresinden uzun süredir `running` durumunda kalan işleri (ör. worker çökmesi sonrası) otomatik olarak yeniden kuyruğa alır. Beklenmeyen bir hata oluşursa iş sessizce takılı kalmaz; `failed` durumuna alınır ve hata mesajı kaydedilir.
 
 ## API
 

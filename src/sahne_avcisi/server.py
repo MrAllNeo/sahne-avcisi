@@ -24,6 +24,29 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 WEB_DIR = PACKAGE_DIR / "web"
 PROJECT_DIR = PACKAGE_DIR.parents[1]
 
+TRACE_MOE_LOCAL_MATCH_THRESHOLD = 90.0
+
+
+def admin_token_matches(expected: str | None, provided: str | None) -> bool:
+    if not expected or not provided:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
+def should_query_trace_moe(
+    *,
+    enabled: bool,
+    requested: bool,
+    category: str,
+    best_local_similarity: float,
+    threshold: float = TRACE_MOE_LOCAL_MATCH_THRESHOLD,
+) -> bool:
+    if not enabled or not requested:
+        return False
+    if category not in {"all", "anime"}:
+        return False
+    return best_local_similarity < threshold
+
 
 class Application:
     def __init__(self) -> None:
@@ -35,6 +58,7 @@ class Application:
             source_file = Path.cwd() / "config" / "sources.json"
         load_seed_sources(self.database, source_file)
         self.trace_moe = TraceMoeClient(api_key=os.environ.get("TRACE_MOE_API_KEY"))
+        self.trace_moe_enabled = os.environ.get("SAHNE_TRACE_MOE", "1").strip() != "0"
         self.rate_limiter = ratelimit.from_environment(dict(os.environ))
 
 
@@ -117,9 +141,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 category=category,
                 limit=limit,
             )
-            trace_status = {"requested": False, "searched_frames": 0}
+            trace_status = {"requested": False, "searched_frames": 0, "enabled": APP.trace_moe_enabled}
             external_error = None
-            if payload.get("use_trace_moe") is True and category in {"all", "anime"}:
+            best_local_similarity = max((float(item.get("similarity", 0)) for item in results), default=0.0)
+            if should_query_trace_moe(
+                enabled=APP.trace_moe_enabled,
+                requested=payload.get("use_trace_moe") is True,
+                category=category,
+                best_local_similarity=best_local_similarity,
+            ):
                 trace_status["requested"] = True
                 try:
                     trace_result = APP.trace_moe.search(
@@ -184,9 +214,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
 
     def is_admin(self) -> bool:
-        expected = os.environ.get("SAHNE_ADMIN_TOKEN")
-        supplied = self.headers.get("X-Admin-Token") or ""
-        return bool(expected) and hmac.compare_digest(supplied, expected)
+        return admin_token_matches(os.environ.get("SAHNE_ADMIN_TOKEN"), self.headers.get("X-Admin-Token"))
 
     def caller_is_trusted(self) -> bool:
         """True when the caller presented the configured service token."""
