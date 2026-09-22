@@ -4,7 +4,7 @@
 
 Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMHY ana katalog olarak izlenir, keşfedilen siteler inceleme kuyruğuna alınır ve yalnızca teknik, hukuki ve güvenlik kontrollerinden geçen kaynaklar sahne indeksleyicisine bağlanır.
 
-> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. İsteğe bağlı trace.moe aramasıyla normal ve 18+ anime sonuçlarını bölüm/zaman koduyla birleştirir. FMHY katalog takibi, güvenli kaynak kuyruğu ve temel HTML5/doğrudan video adaptörleri çalışır.
+> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. İsteğe bağlı trace.moe aramasıyla normal ve 18+ anime sonuçlarını bölüm/zaman koduyla birleştirir. FMHY katalog takibi, güvenli kaynak kuyruğu, HTML5/doğrudan video ve açık HLS VOD adaptörleri çalışır.
 
 ## İlk sürümde çalışanlar
 
@@ -21,6 +21,7 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - HTML5 video, Open Graph video, Video.js, JWPlayer, Plyr, HLS ve iframe oynatıcı tespiti
 - Yalnızca etkinleştirilmiş kaynaklar için kalıcı indeksleme iş kuyruğu
 - Boyut sınırlı geçici video indirme ve bağımsız FFmpeg worker'ı
+- Açık, şifresiz ve tamamlanmış HLS VOD manifestlerini güvenli yerel aynaya alma
 - HTTPS, alan adı, yönlendirme ve özel IP/SSRF kontrolleri
 - Açık kullanıcı onayıyla trace.moe canlı anime sahne araması
 - Yerel indekste zaten güçlü bir eşleşme (%90 üzeri) varsa trace.moe'ye sorulmaz; kota sadece gerektiğinde harcanır
@@ -30,7 +31,7 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - trace.moe kota (402) ve hız sınırı (429) hataları için ayrı, anlaşılır Türkçe uyarılar
 - Yönetici anahtarıyla korunan FMHY eşitleme uç noktası; anahtar karşılaştırması zamanlama saldırılarına karşı `hmac.compare_digest` ile yapılır
 - Yetişkin kaynaklarını varsayılan olarak gizleme ve 18+ onayı
-- Sahne aramasında bellek içi parmak izi önbelleği (kare sayısı değiştiğinde otomatik yenilenir)
+- Parmak izleri 64-bit tamsayı olarak saklanır ve bellekte bitişik dizilerde tutulur; sahne araması numpy ile vektörleştirilmiş tek geçişte puanlanır (indeks değiştiğinde otomatik yenilenir)
 - Kare yazımı tek işlemde toplu yapılır; bir video yeniden indekslenirse eski kareleri otomatik siler
 - Var olmayan bir kaynak kimliğiyle indeksleme denemesi açık bir hata mesajıyla reddedilir
 - FFmpeg/FFprobe kurulu değilse net bir hata ile durur
@@ -143,7 +144,13 @@ sahne-worker --once
 sahne-worker --stale-minutes 30
 ```
 
-Worker doğrudan MP4/WebM/MOV/M4V adreslerini ve HTML sayfasındaki standart video metadatasını çözebilir. HLS veya üçüncü taraf iframe tanınır fakat otomatik işlenmez; içerik sahibinin iznine göre kaynağa özel adaptör gerekir. İndirilen video yalnızca geçici dizinde işlenir ve kare parmak izleri çıkarılınca silinir.
+Worker doğrudan MP4/WebM/MOV/M4V adreslerini, HTML sayfasındaki standart video metadatasını ve açık HLS VOD manifestlerini çözebilir. HLS akışı önce doğrulanır; yalnızca tamamlanmış, şifresiz, boyut/süre sınırları içindeki ve manifest alan adıyla aynı güven sınırındaki parçalar geçici bir yerel aynaya indirilir. Canlı, DRM/şifreli, düşük gecikmeli veya farklı alan adına parça taşıyan manifestler reddedilir. FFmpeg bu aynayı yalnızca `file,data` protokolleriyle okur. Üçüncü taraf iframe için hâlâ kaynağa özel ve izinli adaptör gerekir. İndirilen medya kare parmak izleri çıkarılınca geçici dizinle birlikte silinir.
+
+HLS sınırları worker seçenekleriyle ayarlanabilir:
+
+```bash
+sahne-worker --max-video-mb 1024 --max-hls-hours 4
+```
 
 Worker her başlangıçta `--stale-minutes` süresinden uzun süredir `running` durumunda kalan işleri (ör. worker çökmesi sonrası) otomatik olarak yeniden kuyruğa alır. Beklenmeyen bir hata oluşursa iş sessizce takılı kalmaz; `failed` durumuna alınır ve hata mesajı kaydedilir.
 
@@ -168,7 +175,7 @@ Worker her başlangıçta `--stale-minutes` süresinden uzun süredir `running` 
 2. OpenCLIP/SigLIP embedding ve pgvector/Qdrant araması
 3. Altyazı, filigran ve oynatıcı arayüzü maskeleme
 4. JustWatch/TMDB metadata zenginleştirme
-5. Açık izinli HLS ve ortak iframe oynatıcı adaptörleri
+5. Ortak iframe oynatıcı ve kaynağa özel adaptörler
 6. Kaynak sağlık kontrolleri ve takılı iş kurtarma
 7. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
 

@@ -8,7 +8,7 @@ from urllib.request import Request, build_opener
 
 TRACE_MOE_ENDPOINT = "https://api.trace.moe/search?anilistInfo&cutBorders=2"
 TRACE_MOE_ORIGIN = "https://api.trace.moe/"
-USER_AGENT = "SahneAvcisi/0.4 (+https://github.com/MrAllNeo/sahne-avcisi)"
+USER_AGENT = "SahneAvcisi/0.5 (+https://github.com/MrAllNeo/sahne-avcisi)"
 
 
 class TraceMoeError(RuntimeError):

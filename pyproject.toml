@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sahne-avcisi"
-version = "0.4.0"
+version = "0.7.0"
 description = "FMHY-first screenshot-to-scene search engine"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "TOYWES contributors" }]
-dependencies = ["Pillow>=11.0"]
+dependencies = ["Pillow>=11.0", "numpy>=2.0"]
 
 [project.scripts]
 sahne-avcisi = "sahne_avcisi.server:main"

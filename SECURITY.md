@@ -21,7 +21,9 @@ Bir güvenlik açığı bulursanız herkese açık issue içinde istismar ayrın
 - Gerçek kişi yüz tanıma/kimlik belirleme özelliği eklemeyin.
 - Reşit olmayanlara ilişkin veya yaşı belirsiz gerçek kişi cinsel içeriklerini reddedin ve raporlama prosedürü uygulayın.
 
-Genel adaptör özel, yerel, loopback, link-local ve ayrılmış IP bloklarını reddeder. Kaynak sayfası yalnızca kayıtlı ana alan adı veya alt alanında olabilir. HLS ve üçüncü taraf iframe adresleri tanınsa bile açıkça onaylanmış site adaptörü olmadan takip edilmez.
+Genel adaptör özel, yerel, loopback, link-local ve ayrılmış IP bloklarını reddeder. Kaynak sayfası yalnızca kayıtlı ana alan adı veya alt alanında olabilir. Üçüncü taraf iframe adresleri açıkça onaylanmış site adaptörü olmadan takip edilmez.
+
+HLS desteği yalnızca etkinleştirilmiş kaynaklardaki açık ve tamamlanmış VOD akışları içindir. Manifest ve bütün medya parçaları HTTPS, yönlendirme, alan adı, içerik türü, toplam boyut, parça sayısı ve süre kontrollerinden geçirilerek önce geçici yerel aynaya alınır. Canlı, şifreli/DRM'li ve farklı güven alanına yönelen manifestler reddedilir. FFmpeg ağ protokollerine kapalı çalışır ve yalnızca yerel ayna silinene kadar medya baytlarına erişir.
 
 ## Gizlilik
 

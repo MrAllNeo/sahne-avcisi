@@ -11,9 +11,9 @@ from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-USER_AGENT = "SahneAvcisi/0.4 (+https://github.com/MrAllNeo/sahne-avcisi)"
+USER_AGENT = "SahneAvcisi/0.5 (+https://github.com/MrAllNeo/sahne-avcisi)"
 DIRECT_VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".webm"}
-HLS_EXTENSIONS = {".m3u8"}
+HLS_EXTENSIONS = {".m3u8", ".m3u"}
 
 
 class AdapterError(RuntimeError):
@@ -118,13 +118,61 @@ class PublicHttpClient:
         finally:
             response.close()
 
-    def download_video(self, url: str, destination: Path, *, max_bytes: int) -> str:
+    def fetch_playlist(self, url: str, *, max_bytes: int = 1024 * 1024) -> tuple[str, str]:
         response, final_url = self._open_response(url)
         try:
             content_type = response.headers.get("Content-Type", "application/octet-stream")
             normalized = content_type.split(";", 1)[0].strip().lower()
-            if not (normalized.startswith("video/") or normalized == "application/octet-stream"):
-                raise UnsupportedMediaError("Adres doğrudan bir video dosyası döndürmedi.")
+            allowed = {
+                "application/vnd.apple.mpegurl",
+                "application/x-mpegurl",
+                "audio/mpegurl",
+                "audio/x-mpegurl",
+                "text/plain",
+                "application/octet-stream",
+            }
+            if normalized not in allowed:
+                raise UnsupportedMediaError("Adres HLS manifesti döndürmedi.")
+            self._check_content_length(response, max_bytes)
+            body = response.read(max_bytes + 1)
+            if len(body) > max_bytes:
+                raise AdapterError("HLS manifesti boyut sınırını aşıyor.")
+            text = body.decode("utf-8-sig", errors="strict")
+            if not text.lstrip().startswith("#EXTM3U"):
+                raise UnsupportedMediaError("Adres geçerli bir HLS manifesti döndürmedi.")
+            return text, final_url
+        except UnicodeDecodeError as exc:
+            raise UnsupportedMediaError("HLS manifesti UTF-8 değil.") from exc
+        finally:
+            response.close()
+
+    def download_video(self, url: str, destination: Path, *, max_bytes: int) -> str:
+        final_url, _ = self.download_resource(
+            url,
+            destination,
+            max_bytes=max_bytes,
+            allowed_content_prefixes=("video/",),
+            allowed_content_types={"application/octet-stream", "binary/octet-stream"},
+        )
+        return final_url
+
+    def download_resource(
+        self,
+        url: str,
+        destination: Path,
+        *,
+        max_bytes: int,
+        allowed_content_prefixes: tuple[str, ...],
+        allowed_content_types: set[str],
+    ) -> tuple[str, int]:
+        response, final_url = self._open_response(url)
+        try:
+            content_type = response.headers.get("Content-Type", "application/octet-stream")
+            normalized = content_type.split(";", 1)[0].strip().lower()
+            if normalized not in allowed_content_types and not any(
+                normalized.startswith(prefix) for prefix in allowed_content_prefixes
+            ):
+                raise UnsupportedMediaError("Kaynak beklenen medya türünü döndürmedi.")
             self._check_content_length(response, max_bytes)
             written = 0
             with destination.open("wb") as output:
@@ -133,7 +181,7 @@ class PublicHttpClient:
                     if written > max_bytes:
                         raise AdapterError("Kaynak izin verilen boyut sınırını aşıyor.")
                     output.write(chunk)
-            return final_url
+            return final_url, written
         except Exception:
             destination.unlink(missing_ok=True)
             raise
@@ -268,8 +316,7 @@ class AdapterRegistry:
                 title=_title_from_url(page_url),
                 media_url=page_url,
                 player_type="hls",
-                indexable=False,
-                reason="HLS akışı tanındı; yalnızca açık izinli kaynağa özel adaptörle işlenebilir.",
+                indexable=True,
             )
         return self._resolve_html_page(source, page_url)
 
@@ -301,9 +348,8 @@ class AdapterRegistry:
                     page_url=final_url,
                     title=parser.title or _title_from_url(final_url),
                     media_url=media_url,
-                    player_type=self._player_type(parser, "hls"),
-                    indexable=False,
-                    reason="HLS oynatıcı tanındı; bu kaynak için izinli alan-adı adaptörü gerekiyor.",
+                    player_type="hls",
+                    indexable=True,
                 )
 
         embed_url = urljoin(base_url, parser.embed_candidates[0]) if parser.embed_candidates else None
