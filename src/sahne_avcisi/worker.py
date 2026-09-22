@@ -16,7 +16,7 @@ from .adapters import (
 )
 from .database import Database
 from .hls import HlsMirror
-from .indexer import index_local_video
+from .indexer import StreamingUnsupportedError, index_local_video, index_stream
 from .source_registry import load_seed_sources
 
 
@@ -58,9 +58,14 @@ class IndexWorker:
                 )
                 return {"job_id": job["id"], "status": "blocked", "adapter": resolved.adapter}
 
+            suffix = Path(urlparse(resolved.media_url).path).suffix.lower()
+            is_hls = resolved.player_type == "hls" or suffix in {".m3u8", ".m3u"}
+            if not is_hls:
+                indexed = self._index_streamed(job, source, resolved)
+                if indexed is not None:
+                    return self._finish(job, resolved, indexed)
+
             with TemporaryDirectory(prefix="sahne-video-") as temp_dir:
-                suffix = Path(urlparse(resolved.media_url).path).suffix.lower()
-                is_hls = resolved.player_type == "hls" or suffix in {".m3u8", ".m3u"}
                 if is_hls:
                     mirrored = HlsMirror(
                         self.registry.client,
@@ -90,21 +95,48 @@ class IndexWorker:
                     interval_seconds=self.interval_seconds,
                 )
 
-            self.database.complete_index_job(
-                job["id"],
-                adapter=resolved.adapter,
-                player_type=resolved.player_type,
-                media_url=_redact_url(resolved.media_url),
-                media_id=indexed["media_id"],
-                frame_count=indexed["frames"],
-            )
-            return {"job_id": job["id"], "status": "completed", **indexed}
+            return self._finish(job, resolved, indexed)
         except (UnsafeUrlError, UnsupportedMediaError) as exc:
             self.database.stop_index_job(job["id"], status="blocked", error=str(exc))
             return {"job_id": job["id"], "status": "blocked", "error": str(exc)}
         except (AdapterError, OSError, ValueError, subprocess.SubprocessError) as exc:
             self.database.stop_index_job(job["id"], status="failed", error=str(exc))
             return {"job_id": job["id"], "status": "failed", "error": str(exc)}
+
+
+    def _index_streamed(self, job: dict, source: dict, resolved) -> dict | None:  # noqa: ANN001
+        """Index straight off the wire, or return None to use the file path."""
+        try:
+            with self.registry.client.stream_video(
+                resolved.media_url, max_bytes=self.max_video_bytes
+            ) as chunks:
+                return index_stream(
+                    self.database,
+                    chunks=chunks,
+                    source_id=source["id"],
+                    source_url=resolved.page_url,
+                    title=job.get("title_override") or resolved.title,
+                    category=source["category"],
+                    adult=bool(source["adult"]),
+                    episode=None,
+                    interval_seconds=self.interval_seconds,
+                    duration_ms=resolved.duration_ms,
+                )
+        except StreamingUnsupportedError:
+            # Some containers keep their index at the end of the file and need
+            # a seekable copy; fall back to downloading it.
+            return None
+
+    def _finish(self, job: dict, resolved, indexed: dict) -> dict:  # noqa: ANN001
+        self.database.complete_index_job(
+            job["id"],
+            adapter=resolved.adapter,
+            player_type=resolved.player_type,
+            media_url=_redact_url(resolved.media_url),
+            media_id=indexed["media_id"],
+            frame_count=indexed["frames"],
+        )
+        return {"job_id": job["id"], "status": "completed", **indexed}
 
 
 def _redact_url(url: str | None) -> str | None:

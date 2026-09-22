@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from contextlib import contextmanager
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 from urllib.error import HTTPError
 from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -40,6 +41,9 @@ class AdapterResult:
     indexable: bool
     reason: str | None = None
     embed_url: str | None = None
+    # Known ahead of time for catalogue sources; a streamed pipe cannot be
+    # probed for it the way a downloaded file can.
+    duration_ms: int | None = None
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -172,6 +176,37 @@ class PublicHttpClient:
             allowed_content_types={"application/octet-stream", "binary/octet-stream"},
         )
         return final_url
+
+    @contextmanager
+    def stream_video(self, url: str, *, max_bytes: int) -> Iterator[Iterator[bytes]]:
+        """Yield a validated video body in chunks, without staging it on disk.
+
+        The caller feeds these chunks to FFmpeg's stdin. Keeping the transfer
+        on our own client is what preserves the HTTPS, redirect, private-IP and
+        size guards: FFmpeg never opens a socket of its own.
+        """
+        response, _ = self._open_response(url)
+        try:
+            content_type = response.headers.get("Content-Type", "application/octet-stream")
+            normalized = content_type.split(";", 1)[0].strip().lower()
+            if not normalized.startswith("video/") and normalized not in {
+                "application/octet-stream",
+                "binary/octet-stream",
+            }:
+                raise UnsupportedMediaError("Kaynak beklenen medya türünü döndürmedi.")
+            self._check_content_length(response, max_bytes)
+
+            def chunks() -> Iterator[bytes]:
+                read = 0
+                while chunk := response.read(1024 * 1024):
+                    read += len(chunk)
+                    if read > max_bytes:
+                        raise AdapterError("Kaynak izin verilen boyut sınırını aşıyor.")
+                    yield chunk
+
+            yield chunks()
+        finally:
+            response.close()
 
     def download_resource(
         self,
@@ -367,6 +402,7 @@ class AdapterRegistry:
                 reason=str(exc),
             )
         validate_public_https_url(plan["media_url"])
+        duration = plan.get("duration_seconds")
         return AdapterResult(
             adapter="archive-org",
             page_url=page_url,
@@ -374,6 +410,7 @@ class AdapterRegistry:
             media_url=plan["media_url"],
             player_type="direct",
             indexable=True,
+            duration_ms=int(duration * 1000) if duration else None,
         )
 
     def _resolve_html_page(self, source: dict, page_url: str) -> AdapterResult:

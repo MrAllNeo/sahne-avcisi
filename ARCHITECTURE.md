@@ -40,6 +40,26 @@ FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi öze
 
 Durum alanı yalnızca operatöre aittir: katalog eşitlemesi yeni kaynağı `review-required` ile oluşturur, ancak var olan bir kaydın durumunu güncellemez. Böylece tekrarlanan eşitlemeler elle verilmiş `active`/`disabled` kararlarını geri almaz.
 
+### Akıştan indeksleme
+
+Bir uzun metrajlı film birkaç yüz megabayt, ama geriye bıraktığı parmak izi
+birkaç yüz kilobayt. Filmi önce diske yazmak bu oranı ters çeviriyor ve küçük
+bir sunucuda aynı anda kaç iş koşabileceğini diskin belirlemesine yol açıyordu.
+
+Worker artık gövdeyi kendi doğrulanmış HTTP istemcisinden okuyup doğrudan
+FFmpeg'in `stdin`'ine besliyor. Aktarım bizim istemcimizde kaldığı için HTTPS,
+yönlendirme, özel IP ve boyut kontrolleri aynen geçerli: FFmpeg kendi soketini
+hiç açmıyor. Bu, adrese doğrudan FFmpeg'i bakmaktan farkı olan asıl noktadır.
+
+Ölçülen (Archive.org'dan 25 MB'lık bir film): indir-sonra-işle 14,5 sn ve
+25 MB disk; akış 5,8 sn ve 0 MB. Çıkan kareler ve arama sonuçları birebir aynı.
+
+Boru aranamadığı için iki şey değişir: süre bilgisi `ffprobe` yerine katalog
+metadatasından gelir (`AdapterResult.duration_ms`), ve dizinini dosya sonunda
+tutan kapsayıcılar çözülemez. İkinci durumda `StreamingUnsupportedError`
+fırlatılır ve worker eski indirme yoluna düşer. HLS aynalaması akışa girmez;
+kendi yolunda kalır.
+
 ### Internet Archive adaptörü
 
 `archive-org` türündeki kaynak, oynatıcı sayfası kazımak yerine Archive'ın

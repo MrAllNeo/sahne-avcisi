@@ -20,7 +20,7 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Kaynak adaptörü geliştirme kuyruğu
 - HTML5 video, Open Graph video, Video.js, JWPlayer, Plyr, HLS ve iframe oynatıcı tespiti
 - Yalnızca etkinleştirilmiş kaynaklar için kalıcı indeksleme iş kuyruğu
-- Boyut sınırlı geçici video indirme ve bağımsız FFmpeg worker'ı
+- Videoyu diske yazmadan doğrudan akıştan indeksleme; boru üzerinden okunamayan kapsayıcılar için boyut sınırlı indirmeye geri düşüş
 - Açık, şifresiz ve tamamlanmış HLS VOD manifestlerini güvenli yerel aynaya alma
 - HTTPS, alan adı, yönlendirme ve özel IP/SSRF kontrolleri
 - Internet Archive kamu malı film arşivinden toplu indeks doldurma
