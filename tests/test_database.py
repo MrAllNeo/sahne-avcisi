@@ -52,13 +52,40 @@ class DatabaseTests(unittest.TestCase):
         first_results = self.database.search(query, allow_adult=False)
         self.assertEqual(len(first_results), 1)
 
-        # Cache should reflect newly added frames once frame count changes.
-        self.database.replace_frames(
-            media_id,
-            [(0, fp("0" * 16, "0" * 16)), (2000, fp("0" * 16, "0" * 16))],
+        # Cache should reflect a newly indexed video once frame count changes.
+        other_media_id = self.database.create_media(
+            source_id=SOURCE["id"],
+            title="Other Film",
+            source_url="https://video.example.com/watch/2",
+            category="movie-tv",
+            adult=False,
         )
+        self.database.replace_frames(other_media_id, [(0, fp("0" * 16, "0" * 16))])
         second_results = self.database.search(query, allow_adult=False)
         self.assertEqual(len(second_results), 2)
+
+    def test_search_deduplicates_multiple_matching_frames_from_same_video(self) -> None:
+        # A static scene can match several timestamps of the same video; only
+        # the single strongest-matching candidate per video should surface.
+        media_id = self.database.create_media(
+            source_id=SOURCE["id"],
+            title="Film",
+            source_url="https://video.example.com/watch/1",
+            category="movie-tv",
+            adult=False,
+        )
+        self.database.replace_frames(
+            media_id,
+            [
+                (0, fp("1" * 16, "0" * 16)),  # weaker match
+                (2000, fp("0" * 16, "0" * 16)),  # exact match, strongest
+                (4000, fp("2" * 16, "0" * 16)),  # weaker match
+            ],
+        )
+        query = fp("0" * 16, "0" * 16)
+        results = self.database.search(query, allow_adult=False)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["timestamp_ms"], 2000)
 
     def test_search_cache_is_reused_without_recomputation(self) -> None:
         media_id = self.database.create_media(

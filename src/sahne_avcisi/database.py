@@ -272,7 +272,7 @@ class Database:
                 return self._frame_cache
             rows = connection.execute(
                 """
-                SELECT f.timestamp_ms, f.dhash, f.ahash, m.title, m.episode, m.category,
+                SELECT f.media_id, f.timestamp_ms, f.dhash, f.ahash, m.title, m.episode, m.category,
                        m.adult, m.source_url, s.name AS source_name
                 FROM frames f
                 JOIN media m ON m.id=f.media_id
@@ -319,8 +319,18 @@ class Database:
             item["timestamp"] = _format_timestamp(int(item["timestamp_ms"]))
             item["adult"] = bool(item["adult"])
             scored.append(item)
-        scored.sort(key=lambda item: item["similarity"], reverse=True)
-        return scored[: max(1, min(limit, 25))]
+        # Keep only the strongest-matching timestamp per source video: a static
+        # scene can otherwise flood the results with near-duplicate frames from
+        # the same video instead of surfacing distinct candidates.
+        best_per_media: dict[int, dict] = {}
+        for item in scored:
+            media_id = item["media_id"]
+            if media_id not in best_per_media or item["similarity"] > best_per_media[media_id]["similarity"]:
+                best_per_media[media_id] = item
+        candidates = [{key: value for key, value in item.items() if key != "media_id"}
+                      for item in best_per_media.values()]
+        candidates.sort(key=lambda item: item["similarity"], reverse=True)
+        return candidates[: max(1, min(limit, 25))]
 
     def stats(self) -> dict:
         with self.connect() as connection:
