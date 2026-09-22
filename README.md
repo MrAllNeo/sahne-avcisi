@@ -149,7 +149,19 @@ Kuyruğu ayrı bir süreçte çalıştır:
 sahne-worker
 # Geliştirme veya zamanlanmış görev için yalnızca tek iş:
 sahne-worker --once
+# Toplu içe aktarma için eşzamanlı çalıştır:
+sahne-worker --concurrency 4 --per-host 4
 ```
+
+`--concurrency` kaç işin aynı anda işleneceğini belirler (öntanımlı 1, yani
+sıralı). `--per-host` tek bir kaynak alan adına aynı anda açılacak en fazla
+aktarımı sınırlar (öntanımlı 2); toplu içe aktarmada işlerin çoğu aynı siteye
+gittiği için hızı pratikte bu sayı belirler. Makinedeki çekirdek sayısını aşmak
+işe yaramaz: kare çıkarma FFmpeg'de CPU'ya bağlıdır.
+
+Gerçek ölçüm (Archive.org'dan 6 kısa film, 4 çekirdekli makine): sıralı 34,9 sn;
+`--concurrency 3 --per-host 2` ile 21,0 sn; `--concurrency 4 --per-host 4` ile
+16,2 sn. Üç kurulumda da aynı 786 kare üretildi.
 
 Worker doğrudan MP4/WebM/MOV/M4V adreslerini, HTML sayfasındaki standart video metadatasını ve açık HLS VOD manifestlerini çözebilir. HLS akışı önce doğrulanır; yalnızca tamamlanmış, şifresiz, boyut/süre sınırları içindeki ve manifest alan adıyla aynı güven sınırındaki parçalar geçici bir yerel aynaya indirilir. Canlı, DRM/şifreli, düşük gecikmeli veya farklı alan adına parça taşıyan manifestler reddedilir. FFmpeg bu aynayı yalnızca `file,data` protokolleriyle okur. Üçüncü taraf iframe için hâlâ kaynağa özel ve izinli adaptör gerekir. İndirilen medya kare parmak izleri çıkarılınca geçici dizinle birlikte silinir.
 

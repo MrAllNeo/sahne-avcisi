@@ -12,6 +12,8 @@ from .fingerprint import Fingerprint, to_signed64, to_unsigned64
 
 _FILTERABLE_CATEGORIES = {"movie-tv", "anime", "adult", "adult-animation"}
 
+BUSY_TIMEOUT_MS = 30_000
+
 
 FRAMES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS frames (
@@ -195,6 +197,10 @@ class Database:
     def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        # Without this, a second writer fails instantly with "database is
+        # locked" instead of waiting its turn, which rules out running more
+        # than one indexing worker.
+        connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         try:
             yield connection
             connection.commit()

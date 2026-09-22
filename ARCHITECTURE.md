@@ -60,6 +60,26 @@ tutan kapsayıcılar çözülemez. İkinci durumda `StreamingUnsupportedError`
 fırlatılır ve worker eski indirme yoluna düşer. HLS aynalaması akışa girmez;
 kendi yolunda kalır.
 
+### Eşzamanlı indeksleme
+
+İş kapma zaten yarışmasızdı: `claim_index_job` `BEGIN IMMEDIATE` ile yazma
+kilidini alır ve `status='queued'` koşullu `UPDATE`'in `rowcount`'unu kontrol
+eder, yani iki worker aynı işi alamaz. Eşzamanlılığı açmak için gereken diğer
+iki parça eklendi.
+
+`HostLimiter` tek bir alan adına aynı anda açılacak aktarım sayısını sınırlar.
+Eşzamanlılık bizim verimimiz için; çektiğimiz kataloğun bunu hissetmemesi
+gerekir. Toplu içe aktarmada işlerin neredeyse tamamı aynı siteye gittiği için
+pratikte hızı belirleyen sayı da budur.
+
+SQLite bağlantılarında `busy_timeout` 30 saniyeye çıkarıldı. Python'ın
+varsayılanı 5 saniyedir; tek bir işin binlerce kare yazması bunu aşabilir ve
+diğer worker'a "database is locked" döndürebilir.
+
+Ölçülen (6 kısa film, 4 çekirdek): sıralı 34,9 sn, `--concurrency 4
+--per-host 4` ile 16,2 sn. Hızlanma doğrusal değil; nezaket sınırı bilerek
+bağlayıcı kısıt bırakıldı ve kare çıkarma CPU'ya bağlı.
+
 ### Internet Archive adaptörü
 
 `archive-org` türündeki kaynak, oynatıcı sayfası kazımak yerine Archive'ın
