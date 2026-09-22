@@ -68,13 +68,13 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(result.title, "Örnek Film")
         self.assertEqual(result.player_type, "videojs")
 
-    def test_hls_is_detected_but_not_automatically_indexed(self) -> None:
+    def test_hls_is_detected_and_marked_indexable(self) -> None:
         registry = AdapterRegistry(client=FakePageClient('<video src="https://cdn.example.com/a.m3u8"></video>'))
         with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
             result = registry.resolve(SOURCE, "https://video.example.com/watch/42")
-        self.assertFalse(result.indexable)
-        self.assertEqual(result.player_type, "html5")
-        self.assertIn("HLS", result.reason)
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.player_type, "hls")
+        self.assertEqual(result.media_url, "https://cdn.example.com/a.m3u8")
 
     def test_worker_completes_a_direct_video_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
