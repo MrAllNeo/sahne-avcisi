@@ -28,6 +28,7 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Açık kullanıcı onayıyla trace.moe canlı anime sahne araması
 - AniList başlığı, bölüm, zaman kodu, benzerlik ve kısa sahne önizlemesi
 - trace.moe sonuçlarında 18+ içeriği sunucu tarafında ayrıca filtreleme
+- Servis token'ı ile korunabilen API ve arama ucunda istemci başına hız sınırı
 - Yönetici anahtarıyla korunan FMHY eşitleme uç noktası
 - Yetişkin kaynaklarını varsayılan olarak gizleme ve 18+ onayı
 - Docker ile çalıştırma
@@ -79,6 +80,32 @@ sahne-index ./ornek-video.mp4 \
 ```
 
 Yetişkinlere yönelik, yasal ve izinli bir içeriği indekslerken `--adult` bayrağı ayrıca verilmelidir.
+
+## Servisi internete açarken
+
+Varsayılanda API açıktır; yerel kullanım ve kendi sunucunda barındırma böyle
+basit kalıyor. Servisi kendi genel adresiyle yayına alıyorsan — örneğin FWT'nin
+arkasında bir Railway servisi olarak — iki ayarı vermelisin:
+
+```bash
+SAHNE_INTERNAL_TOKEN="uzun-rastgele-bir-deger"   # tüm /api uçları için zorunlu
+SAHNE_RATE_LIMIT=60                              # istemci başına istek (0 = kapalı)
+SAHNE_RATE_WINDOW=60                             # saniye cinsinden pencere
+```
+
+`SAHNE_INTERNAL_TOKEN` verildiğinde `/api/health` dışındaki bütün uçlar
+`X-Sahne-Internal-Token` başlığını ister; karşılaştırma `hmac.compare_digest`
+ile yapılır. `/api/health` açık kalır çünkü platformun sağlık yoklaması oradan
+geçer.
+
+**Dikkat:** token verildiğinde servisin kendi web arayüzü de çalışmaz, çünkü
+tarayıcı bu başlığı gönderemez. Bu bilinçli bir takas: servis, FWT'nin arkasında
+yalnızca arka uç olarak çalışır.
+
+Hız sınırı istemci IP'sine göre uygulanır. FWT gibi bir vekilin arkasındaysan
+bütün kullanıcılar tek IP'den göründüğü için sınır toplamda geçerli olur; FWT
+zaten kendi tarafında kullanıcı başına ayrıca sınırlıyor. Öntanımlı 60/dakika
+bunu göz önüne alarak seçildi.
 
 ## FMHY kaynak keşfi
 
