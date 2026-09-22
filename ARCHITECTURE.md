@@ -188,6 +188,34 @@ LSH veya BK-tree denenmedi çünkü varsayılan eşik olan 0,55 benzerlik 128 bi
 hiçbir bucket şeması aday sayısını anlamlı biçimde azaltmaz. Eşik belirgin
 şekilde sıkılaştırılırsa bu yapılar yeniden gündeme gelebilir.
 
+## Kare örnekleme: neden sabit aralık
+
+Yol haritasında bir süre "sahne değişimi tabanlı akıllı örnekleme" maddesi
+durdu. Ölçüldü ve **kötü çıktı**; madde bu yüzden kaldırıldı.
+
+Deney: 378 saniyelik bir film, hiçbir örnekleme noktasına hizalanmamış 29
+rastgele sorgu karesi. Her indekste sorgunun bulduğu en iyi benzerlik:
+
+| Yaklaşım | Kare | Ortalama | Medyan | ≥%85 bulan |
+|---|---|---|---|---|
+| Sabit 2 sn | 189 | %94,1 | %99,2 | 24/29 |
+| Sabit 6 sn | 63 | %89,1 | %93,8 | 19/29 |
+| Sahne değişimi (eşik 0,3) | 64 | %72,9 | %67,2 | 5/29 |
+
+Kritik karşılaştırma son iki satır: neredeyse aynı indeks boyutunda sahne
+tespiti, düz seyrek örneklemenin belirgin biçimde altında kalıyor.
+
+Sebep, parmak izinin neye dayanıklı olduğuyla ilgili. Yeniden kodlama ve renk
+düzenlemesine karşı bağışık (ölçüldü: %97-100), ama **içerik değişimine karşı
+değil**. Bir çekimin yalnızca ilk karesini saklamak, o çekim boyunca kamera
+veya oyuncu hareket ettiğinde ortadaki anları kapsamasız bırakıyor. Eşleşmeyi
+belirleyen şey çekim sayısı değil, görsel zaman çizgisinin ne kadarının
+örneklendiği.
+
+Pratik sonuç: indeksi küçültmek istiyorsan `--interval` değerini büyüt. 2
+saniyeden 6 saniyeye çıkmak kareyi üçte bire indiriyor ve ortalama benzerlikten
+yaklaşık 5 puan götürüyor — okunabilir bir takas.
+
 Bundan sonraki ölçek adımı için:
 
 - Metadata: PostgreSQL

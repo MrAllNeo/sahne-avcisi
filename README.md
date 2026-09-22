@@ -215,13 +215,12 @@ sahne-worker --max-video-mb 1024 --max-hls-hours 4
 
 ## Yol haritası
 
-1. Sahne değişimi tabanlı akıllı kare örnekleme
-2. OpenCLIP/SigLIP embedding ve pgvector/Qdrant araması
-3. Altyazı, filigran ve oynatıcı arayüzü maskeleme
-4. JustWatch/TMDB metadata zenginleştirme
-5. Ortak iframe oynatıcı ve kaynağa özel adaptörler
-6. Kaynak sağlık kontrolleri ve takılı iş kurtarma
-7. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
+1. OpenCLIP/SigLIP embedding ve pgvector/Qdrant araması
+2. Altyazı, filigran ve oynatıcı arayüzü maskeleme
+3. JustWatch/TMDB metadata zenginleştirme
+4. Ortak iframe oynatıcı ve kaynağa özel adaptörler
+5. Kaynak sağlık kontrolleri ve takılı iş kurtarma
+6. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
 
 Detaylı tasarım için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasına bakın.
 
