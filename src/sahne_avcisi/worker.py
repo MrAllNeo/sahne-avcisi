@@ -15,6 +15,7 @@ from .adapters import (
     UnsupportedMediaError,
 )
 from .database import Database
+from .hls import HlsMirror
 from .indexer import index_local_video
 from .source_registry import load_seed_sources
 
@@ -26,11 +27,13 @@ class IndexWorker:
         *,
         registry: AdapterRegistry | None = None,
         max_video_bytes: int = 1024 * 1024 * 1024,
+        max_hls_duration_seconds: float = 4 * 60 * 60,
         interval_seconds: float = 2.0,
     ) -> None:
         self.database = database
         self.registry = registry or AdapterRegistry()
         self.max_video_bytes = max_video_bytes
+        self.max_hls_duration_seconds = max_hls_duration_seconds
         self.interval_seconds = interval_seconds
 
     def run_once(self) -> dict | None:
@@ -55,14 +58,26 @@ class IndexWorker:
                 )
                 return {"job_id": job["id"], "status": "blocked", "adapter": resolved.adapter}
 
-            suffix = Path(urlparse(resolved.media_url).path).suffix.lower() or ".video"
             with TemporaryDirectory(prefix="sahne-video-") as temp_dir:
-                media_path = Path(temp_dir) / f"source{suffix}"
-                self.registry.client.download_video(
-                    resolved.media_url,
-                    media_path,
-                    max_bytes=self.max_video_bytes,
-                )
+                suffix = Path(urlparse(resolved.media_url).path).suffix.lower()
+                is_hls = resolved.player_type == "hls" or suffix in {".m3u8", ".m3u"}
+                if is_hls:
+                    mirrored = HlsMirror(
+                        self.registry.client,
+                        max_duration_seconds=self.max_hls_duration_seconds,
+                    ).mirror(
+                        resolved.media_url,
+                        Path(temp_dir) / "hls",
+                        max_bytes=self.max_video_bytes,
+                    )
+                    media_path = mirrored.manifest_path
+                else:
+                    media_path = Path(temp_dir) / f"source{suffix or '.video'}"
+                    self.registry.client.download_video(
+                        resolved.media_url,
+                        media_path,
+                        max_bytes=self.max_video_bytes,
+                    )
                 indexed = index_local_video(
                     self.database,
                     media_file=media_path,
@@ -107,6 +122,7 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--interval", type=float, default=2.0)
     parser.add_argument("--max-video-mb", type=int, default=1024)
+    parser.add_argument("--max-hls-hours", type=float, default=4.0)
     args = parser.parse_args()
 
     database = Database(args.database)
@@ -114,6 +130,7 @@ def main() -> None:
     worker = IndexWorker(
         database,
         max_video_bytes=max(1, args.max_video_mb) * 1024 * 1024,
+        max_hls_duration_seconds=max(0.1, args.max_hls_hours) * 60 * 60,
         interval_seconds=max(0.5, args.interval),
     )
 

@@ -12,6 +12,17 @@ from .fingerprint import fingerprint_bytes
 from .source_registry import load_seed_sources
 
 
+def _input_options(media_file: Path) -> list[str]:
+    if media_file.suffix.lower() not in {".m3u8", ".m3u"}:
+        return []
+    return [
+        "-protocol_whitelist",
+        "file,data",
+        "-allowed_extensions",
+        "ALL",
+    ]
+
+
 def probe_duration_ms(media_file: Path) -> int | None:
     command = [
         "ffprobe",
@@ -21,6 +32,7 @@ def probe_duration_ms(media_file: Path) -> int | None:
         "format=duration",
         "-of",
         "json",
+        *_input_options(media_file),
         str(media_file),
     ]
     result = subprocess.run(command, check=True, capture_output=True, text=True)
@@ -37,6 +49,7 @@ def extract_frames(media_file: Path, output_dir: Path, interval_seconds: float) 
         "-hide_banner",
         "-loglevel",
         "error",
+        *_input_options(media_file),
         "-i",
         str(media_file),
         "-vf",
@@ -113,4 +126,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

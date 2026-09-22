@@ -39,12 +39,12 @@ APP = Application()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "SahneAvcisi/0.4"
+    server_version = "SahneAvcisi/0.5"
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.4.0"})
+            self.send_json({"ok": True, "service": "sahne-avcisi", "version": "0.5.0"})
             return
         if parsed.path == "/api/stats":
             self.send_json(APP.database.stats())
