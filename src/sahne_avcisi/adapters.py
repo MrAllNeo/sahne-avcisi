@@ -10,6 +10,8 @@ from urllib.error import HTTPError
 from urllib.parse import unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from . import archive_org
+
 
 USER_AGENT = "SahneAvcisi/0.5 (+https://github.com/MrAllNeo/sahne-avcisi)"
 DIRECT_VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".webm"}
@@ -115,6 +117,21 @@ class PublicHttpClient:
                 if "charset=" in part.lower():
                     charset = part.split("=", 1)[1].strip().strip('"') or "utf-8"
             return body.decode(charset, errors="replace"), final_url
+        finally:
+            response.close()
+
+    def fetch_json(self, url: str, *, max_bytes: int = 4 * 1024 * 1024) -> tuple[str, str]:
+        response, final_url = self._open_response(url)
+        try:
+            content_type = response.headers.get("Content-Type", "application/octet-stream")
+            normalized = content_type.split(";", 1)[0].strip().lower()
+            if normalized not in {"application/json", "text/json", "application/javascript"}:
+                raise UnsupportedMediaError("Adres JSON döndürmedi.")
+            self._check_content_length(response, max_bytes)
+            body = response.read(max_bytes + 1)
+            if len(body) > max_bytes:
+                raise AdapterError("JSON yanıtı boyut sınırını aşıyor.")
+            return body.decode("utf-8", errors="replace"), final_url
         finally:
             response.close()
 
@@ -287,8 +304,14 @@ def _title_from_url(url: str) -> str:
 
 
 class AdapterRegistry:
-    def __init__(self, client: PublicHttpClient | None = None):
+    def __init__(
+        self,
+        client: PublicHttpClient | None = None,
+        *,
+        max_item_bytes: int = 1024 * 1024 * 1024,
+    ):
         self.client = client or PublicHttpClient()
+        self.max_item_bytes = max_item_bytes
 
     def resolve(self, source: dict, page_url: str) -> AdapterResult:
         if source.get("status") != "active":
@@ -298,6 +321,9 @@ class AdapterRegistry:
         if not source_allows_url(source, page_url):
             raise UnsafeUrlError("Video adresi seçilen kaynağın alan adına ait değil.")
         validate_public_https_url(page_url)
+
+        if source.get("kind") == "archive-org":
+            return self._resolve_archive_item(page_url)
 
         extension = _extension(page_url)
         if extension in DIRECT_VIDEO_EXTENSIONS:
@@ -319,6 +345,36 @@ class AdapterRegistry:
                 indexable=True,
             )
         return self._resolve_html_page(source, page_url)
+
+    def _resolve_archive_item(self, page_url: str) -> AdapterResult:
+        identifier = archive_org.parse_identifier(page_url)
+        if identifier is None:
+            raise UnsupportedMediaError("Adres bir Archive.org öğesi değil.")
+        payload, _ = self.client.fetch_json(archive_org.metadata_url(identifier))
+        document = archive_org.parse_metadata(payload)
+        try:
+            plan = archive_org.plan_item(document, max_bytes=self.max_item_bytes)
+        except archive_org.ArchiveOrgError as exc:
+            # A refusal is a permanent property of the item, not a transport
+            # failure, so report it as non-indexable rather than raising.
+            return AdapterResult(
+                adapter="archive-org",
+                page_url=page_url,
+                title=identifier,
+                media_url=None,
+                player_type="direct",
+                indexable=False,
+                reason=str(exc),
+            )
+        validate_public_https_url(plan["media_url"])
+        return AdapterResult(
+            adapter="archive-org",
+            page_url=page_url,
+            title=plan["title"],
+            media_url=plan["media_url"],
+            player_type="direct",
+            indexable=True,
+        )
 
     def _resolve_html_page(self, source: dict, page_url: str) -> AdapterResult:
         html, final_url = self.client.fetch_text(page_url)

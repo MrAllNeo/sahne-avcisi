@@ -31,7 +31,7 @@ class IndexWorker:
         interval_seconds: float = 2.0,
     ) -> None:
         self.database = database
-        self.registry = registry or AdapterRegistry()
+        self.registry = registry or AdapterRegistry(max_item_bytes=max_video_bytes)
         self.max_video_bytes = max_video_bytes
         self.max_hls_duration_seconds = max_hls_duration_seconds
         self.interval_seconds = interval_seconds

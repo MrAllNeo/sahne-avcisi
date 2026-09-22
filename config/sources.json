@@ -22,6 +22,17 @@
     "notes": "FMHY yedek katalog kaynağı"
   },
   {
+    "id": "archive-org",
+    "name": "Internet Archive",
+    "base_url": "https://archive.org/",
+    "kind": "archive-org",
+    "category": "movie-tv",
+    "adult": false,
+    "status": "active",
+    "priority": 95,
+    "notes": "Kamu malı ve CC lisanslı film arşivi; yalnızca lisansı açıkça belirtilmiş öğeler indekslenir"
+  },
+  {
     "id": "trace-moe",
     "name": "trace.moe",
     "base_url": "https://trace.moe/",

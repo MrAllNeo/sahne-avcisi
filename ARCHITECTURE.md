@@ -40,6 +40,22 @@ FMHY yıldızlı kaynakları, oynatıcı türleri, 4K/otomatik oynatma gibi öze
 
 Durum alanı yalnızca operatöre aittir: katalog eşitlemesi yeni kaynağı `review-required` ile oluşturur, ancak var olan bir kaydın durumunu güncellemez. Böylece tekrarlanan eşitlemeler elle verilmiş `active`/`disabled` kararlarını geri almaz.
 
+### Internet Archive adaptörü
+
+`archive-org` türündeki kaynak, oynatıcı sayfası kazımak yerine Archive'ın
+belgelenmiş `archive.org/metadata/<id>` API'sini kullanır: öğe kimliği URL'den
+çıkarılır, dosya listesinden en uygun video rendition'ı seçilir ve
+`archive.org/download/...` adresi doğrudan indirme hedefi olur.
+
+Adaptör iki kapı uygular. Öğenin `mediatype` alanı `movies` değilse reddedilir.
+Lisans alanı (`licenseurl`/`license`/`rights`) kamu malı veya Creative Commons
+göstermiyorsa da reddedilir — eksik lisans izin sayılmaz. Her iki durumda da iş
+`failed` değil `blocked` olur, çünkü bu öğenin kalıcı bir özelliğidir, geçici bir
+aktarım hatası değil.
+
+Boyut tavanı worker'ın `max_video_bytes` değerinden gelir; adaptör dosya seçimini
+buna göre daraltır, indirme koruması ayrıca yeniden doğrular.
+
 ### Kaynak adaptörü sözleşmesi
 
 `AdapterRegistry`, etkin bir kaynağın kendi alan adındaki sayfayı çözer ve standart oynatıcı işaretlerini ortak bir sonuca dönüştürür:

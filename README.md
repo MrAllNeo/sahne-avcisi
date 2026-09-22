@@ -23,6 +23,8 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Boyut sınırlı geçici video indirme ve bağımsız FFmpeg worker'ı
 - Açık, şifresiz ve tamamlanmış HLS VOD manifestlerini güvenli yerel aynaya alma
 - HTTPS, alan adı, yönlendirme ve özel IP/SSRF kontrolleri
+- Internet Archive kamu malı film arşivinden toplu indeks doldurma
+- Archive.org öğelerinde lisans doğrulaması; lisansı belirtilmemiş öğeleri indekslememe
 - Açık kullanıcı onayıyla trace.moe canlı anime sahne araması
 - AniList başlığı, bölüm, zaman kodu, benzerlik ve kısa sahne önizlemesi
 - trace.moe sonuçlarında 18+ içeriği sunucu tarafında ayrıca filtreleme
@@ -102,6 +104,29 @@ sahne-sync-fmhy
 Takipçi FMHY'nin güncel `/video` ve `/non-english` kataloglarını tarar. İndirme, torrent, canlı TV, Smart TV/uygulama listeleri ve yardımcı durum/dokümantasyon bağlantıları sahne adaptörü kuyruğunun dışında tutulur. IMDb/Letterboxd gibi izleme-veritabanı bağlantıları kayıt merkezinde `metadata` olarak saklanır; indeksleme kuyruğu bu türü kabul etmez.
 
 FMHY'nin yıldızla işaretlediği kaynaklar `fmhy-starred` etiketiyle daha yüksek önceliğe alınır, böylece inceleme kuyruğu topluluğun önerdiği kaynaklardan başlar.
+
+## İndeksi kamu malı filmlerle doldurma
+
+trace.moe anime tarafını hazır bir indeksle karşılar; film/dizi tarafında indeksi
+sen doldurursun. Internet Archive bunun için hazır bir kaynak olarak gelir:
+`feature_films` koleksiyonunda lisansı açıkça kamu malı olarak işaretlenmiş
+binlerce tam uzunlukta film var ve Archive programatik erişim için belgelenmiş
+bir API sunuyor.
+
+```bash
+# Varsayılan sorgu: kamu malı lisansı belirtilmiş uzun metraj filmler
+sahne-import-archive --limit 25
+
+# Kendi sorgunla
+sahne-import-archive --query 'collection:(prelinger) AND mediatype:(movies)' --limit 50
+```
+
+Komut yalnızca kuyruğa ekler; indirme ve kare çıkarma işini `sahne-worker` yapar.
+
+Adaptör her öğeyi indekslemez. `archive.org/metadata` yanıtında lisans alanı
+kamu malı veya Creative Commons göstermiyorsa öğe `blocked` olarak işaretlenir ve
+indirilmez — eksik lisans izin sayılmaz. Öğe video değilse veya boyut sınırını
+aşıyorsa yine aynı şekilde atlanır.
 
 ## Kaynak URL'sini indeksleme
 
