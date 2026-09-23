@@ -9,6 +9,7 @@ from unittest.mock import patch
 from sahne_avcisi.adapters import (
     AdapterRegistry,
     AdapterResult,
+    UnsupportedMediaError,
     UnsafeUrlError,
     validate_public_https_url,
 )
@@ -23,6 +24,16 @@ SOURCE = {
     "kind": "video-site",
     "category": "movie-tv",
     "adult": False,
+    "status": "active",
+}
+
+RULE34VIDEO_SOURCE = {
+    "id": "rule34video",
+    "name": "Rule34Video",
+    "base_url": "https://rule34video.com/",
+    "kind": "rule34video",
+    "category": "adult-animation",
+    "adult": True,
     "status": "active",
 }
 
@@ -83,6 +94,50 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(result.indexable)
         self.assertEqual(result.player_type, "hls")
         self.assertEqual(result.media_url, "https://cdn.example.com/a.m3u8")
+
+    def test_rule34video_uses_highest_quality_public_download_link(self) -> None:
+        html = """
+        <html><head><meta property="og:title" content="Örnek Animasyon"></head><body>
+          <a href="/get/42-480.mp4?download=true">MP4 480p</a>
+          <a href="https://cdn.example.com/get/42-1080.mp4?token=x&amp;download=true">
+            MP4 <strong>1080p</strong>
+          </a>
+        </body></html>
+        """
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(RULE34VIDEO_SOURCE, "https://rule34video.com/video/42/example")
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.adapter, "rule34video-public-download")
+        self.assertEqual(
+            result.media_url,
+            "https://cdn.example.com/get/42-1080.mp4?token=x&download=true",
+        )
+        self.assertEqual(result.title, "Örnek Animasyon")
+        self.assertEqual(result.player_type, "direct")
+
+    def test_rule34video_accepts_plural_video_path(self) -> None:
+        html = '<a href="/media/42.mp4?download=true">Download</a>'
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(RULE34VIDEO_SOURCE, "https://rule34video.com/videos/42/example")
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.media_url, "https://rule34video.com/media/42.mp4?download=true")
+
+    def test_rule34video_blocks_pages_without_public_download_link(self) -> None:
+        html = "<html><title>Kontrollü oynatıcı</title><body>CAPTCHA</body></html>"
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(RULE34VIDEO_SOURCE, "https://rule34video.com/video/42/example")
+        self.assertFalse(result.indexable)
+        self.assertIsNone(result.media_url)
+        self.assertIn("CAPTCHA", result.reason or "")
+
+    def test_rule34video_rejects_non_video_page(self) -> None:
+        registry = AdapterRegistry(client=FakePageClient("<html></html>"))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            with self.assertRaises(UnsupportedMediaError):
+                registry.resolve(RULE34VIDEO_SOURCE, "https://rule34video.com/latest-updates/")
 
     def test_worker_completes_a_direct_video_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -8,15 +9,16 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable, Iterator
 from urllib.error import HTTPError
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from . import archive_org
 
 
-USER_AGENT = "SahneAvcisi/0.5 (+https://github.com/MrAllNeo/sahne-avcisi)"
+USER_AGENT = "SahneAvcisi/0.11 (+https://github.com/MrAllNeo/sahne-avcisi)"
 DIRECT_VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".webm"}
 HLS_EXTENSIONS = {".m3u8", ".m3u"}
+RULE34VIDEO_PAGE_PATH = re.compile(r"^/videos?/\d+(?:/|$)")
 
 
 class AdapterError(RuntimeError):
@@ -329,6 +331,46 @@ class _MediaPageParser(HTMLParser):
             self._title_parts.append(data.strip())
 
 
+class _Rule34VideoParser(_MediaPageParser):
+    """Collect public download links exposed directly by a video page."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.download_candidates: list[tuple[int, str]] = []
+        self._download_href: str | None = None
+        self._download_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        super().handle_starttag(tag, attrs)
+        if tag.lower() != "a":
+            return
+        values = {key.lower(): (value or "") for key, value in attrs}
+        href = values.get("href", "").strip()
+        download_values = {
+            value.lower()
+            for value in parse_qs(urlparse(href).query, keep_blank_values=True).get("download", [])
+        }
+        if "true" in download_values:
+            self._download_href = href
+            self._download_text = []
+
+    def handle_data(self, data: str) -> None:
+        super().handle_data(data)
+        if self._download_href is not None:
+            self._download_text.append(data.strip())
+
+    def handle_endtag(self, tag: str) -> None:
+        super().handle_endtag(tag)
+        if tag.lower() != "a" or self._download_href is None:
+            return
+        label = " ".join(part for part in self._download_text if part)
+        quality_match = re.search(r"(?<!\d)(\d{3,4})\s*p\b", label, flags=re.IGNORECASE)
+        quality = int(quality_match.group(1)) if quality_match else 0
+        self.download_candidates.append((quality, self._download_href))
+        self._download_href = None
+        self._download_text = []
+
+
 def _extension(url: str) -> str:
     return Path(unquote(urlparse(url).path)).suffix.lower()
 
@@ -359,6 +401,8 @@ class AdapterRegistry:
 
         if source.get("kind") == "archive-org":
             return self._resolve_archive_item(page_url)
+        if source.get("kind") == "rule34video":
+            return self._resolve_rule34video(source, page_url)
 
         extension = _extension(page_url)
         if extension in DIRECT_VIDEO_EXTENSIONS:
@@ -380,6 +424,45 @@ class AdapterRegistry:
                 indexable=True,
             )
         return self._resolve_html_page(source, page_url)
+
+    def _resolve_rule34video(self, source: dict, page_url: str) -> AdapterResult:
+        if not RULE34VIDEO_PAGE_PATH.match(urlparse(page_url).path):
+            raise UnsupportedMediaError("Adres geçerli bir Rule34Video video sayfası değil.")
+
+        html, final_url = self.client.fetch_text(page_url)
+        if not source_allows_url(source, final_url):
+            raise UnsafeUrlError("Kaynak sayfası izinli alan adının dışına yönlendirdi.")
+        if not RULE34VIDEO_PAGE_PATH.match(urlparse(final_url).path):
+            raise UnsupportedMediaError("Kaynak geçerli bir video sayfasına yönlendirmedi.")
+
+        parser = _Rule34VideoParser()
+        parser.feed(html)
+        title = parser.title or _title_from_url(final_url)
+        if not parser.download_candidates:
+            return AdapterResult(
+                adapter="rule34video-public-download",
+                page_url=final_url,
+                title=title,
+                media_url=None,
+                player_type=self._player_type(parser, "unknown"),
+                indexable=False,
+                reason=(
+                    "Herkese açık doğrudan indirme bağlantısı bulunamadı; "
+                    "CAPTCHA, DRM veya oturum gerektiren akışlar desteklenmez."
+                ),
+            )
+
+        _, candidate = max(parser.download_candidates, key=lambda item: item[0])
+        media_url = urljoin(final_url, candidate)
+        validate_public_https_url(media_url)
+        return AdapterResult(
+            adapter="rule34video-public-download",
+            page_url=final_url,
+            title=title,
+            media_url=media_url,
+            player_type="direct",
+            indexable=True,
+        )
 
     def _resolve_archive_item(self, page_url: str) -> AdapterResult:
         identifier = archive_org.parse_identifier(page_url)

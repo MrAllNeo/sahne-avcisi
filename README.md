@@ -19,6 +19,7 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Yeni, güncellenen, kaybolan ve geri dönen kaynak geçmişi
 - Kaynak adaptörü geliştirme kuyruğu
 - HTML5 video, Open Graph video, Video.js, JWPlayer, Plyr, HLS ve iframe oynatıcı tespiti
+- Rule34Video video sayfalarında herkese açık sunulan doğrudan indirme bağlantılarını çözme
 - Yalnızca etkinleştirilmiş kaynaklar için kalıcı indeksleme iş kuyruğu
 - Videoyu diske yazmadan doğrudan akıştan indeksleme; boru üzerinden okunamayan kapsayıcılar için boyut sınırlı indirmeye geri düşüş
 - Açık, şifresiz ve tamamlanmış HLS VOD manifestlerini güvenli yerel aynaya alma
@@ -211,6 +212,8 @@ Gerçek ölçüm (Archive.org'dan 6 kısa film, 4 çekirdekli makine): sıralı 
 16,2 sn. Üç kurulumda da aynı 786 kare üretildi.
 
 Worker doğrudan MP4/WebM/MOV/M4V adreslerini, HTML sayfasındaki standart video metadatasını ve açık HLS VOD manifestlerini çözebilir. HLS akışı önce doğrulanır; yalnızca tamamlanmış, şifresiz, boyut/süre sınırları içindeki ve manifest alan adıyla aynı güven sınırındaki parçalar geçici bir yerel aynaya indirilir. Canlı, DRM/şifreli, düşük gecikmeli veya farklı alan adına parça taşıyan manifestler reddedilir. FFmpeg bu aynayı yalnızca `file,data` protokolleriyle okur. Üçüncü taraf iframe için hâlâ kaynağa özel ve izinli adaptör gerekir. İndirilen medya kare parmak izleri çıkarılınca geçici dizinle birlikte silinir.
+
+Rule34Video adaptörü yalnızca `/video/<id>` ve `/videos/<id>` sayfalarında HTML içinde herkese açık olarak sunulan `download=true` bağlantılarını kullanır ve mevcut seçenekler arasından en yüksek çözünürlüğü seçer. Doğrudan bağlantı yoksa iş `blocked` olur; CAPTCHA, DRM, oturum açma veya başka erişim kontrolleri aşılmaz.
 
 HLS sınırları worker seçenekleriyle ayarlanabilir:
 

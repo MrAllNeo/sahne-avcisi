@@ -58,12 +58,12 @@
     "id": "rule34video",
     "name": "Rule34Video",
     "base_url": "https://rule34video.com/",
-    "kind": "video-site",
+    "kind": "rule34video",
     "category": "adult-animation",
     "adult": true,
-    "status": "adapter-required",
+    "status": "active",
     "priority": 86,
-    "notes": "Kaynak ve yaş güvenliği incelemesi zorunlu"
+    "notes": "Yalnızca video sayfasında herkese açık sunulan doğrudan indirme bağlantıları"
   },
   {
     "id": "pornhub",

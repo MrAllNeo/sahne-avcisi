@@ -112,6 +112,8 @@ class AdapterResult:
 
 Genel adaptör doğrudan video, Open Graph video ve HTML5 `video/source` elemanlarını indeksleyebilir. Açık HLS VOD manifestleri güvenli yerel aynaya alınarak indekslenir; iframe oynatıcılar yalnızca tespit edilir ve `blocked` durumuna alınır. Adaptör DRM, oturum, ödeme duvarı, CAPTCHA veya başka bir erişim kontrolünü aşmamalıdır.
 
+`rule34video` adaptörü yalnızca geçerli video sayfalarında HTML tarafından herkese açık sunulan `download=true` bağlantılarını toplar ve çözünürlük etiketine göre en yüksek seçeneği kullanır. Bu bağlantılar yoksa genel oynatıcıyı tersine mühendislik etmez; işi kalıcı olarak `blocked` sonucuna dönüştürür.
+
 ### HLS güvenli aynası
 
 `HlsMirror`, ana manifestten hedefe en yakın 480p varyantı seçer ve medya manifestini ayrıştırır. Yalnızca `#EXT-X-ENDLIST` içeren tamamlanmış VOD akışları kabul edilir. Canlı/düşük gecikmeli akışlar, şifre anahtarları, desteklenmeyen URI etiketleri, aşırı süre/parça sayısı ve manifest güven alanı dışındaki parçalar reddedilir.
