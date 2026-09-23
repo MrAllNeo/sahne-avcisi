@@ -103,6 +103,7 @@ class IndexWorker:
 
         suffix = Path(urlparse(resolved.media_url).path).suffix.lower()
         is_hls = resolved.player_type == "hls" or suffix in {".m3u8", ".m3u"}
+        request_headers = dict(resolved.request_headers)
         if not is_hls:
             indexed = self._index_streamed(job, source, resolved)
             if indexed is not None:
@@ -117,15 +118,15 @@ class IndexWorker:
                     resolved.media_url,
                     Path(temp_dir) / "hls",
                     max_bytes=self.max_video_bytes,
+                    headers=request_headers,
                 )
                 media_path = mirrored.manifest_path
             else:
                 media_path = Path(temp_dir) / f"source{suffix or '.video'}"
-                self.registry.client.download_video(
-                    resolved.media_url,
-                    media_path,
-                    max_bytes=self.max_video_bytes,
-                )
+                download_kwargs = {"max_bytes": self.max_video_bytes}
+                if request_headers:
+                    download_kwargs["headers"] = request_headers
+                self.registry.client.download_video(resolved.media_url, media_path, **download_kwargs)
             indexed = index_local_video(
                 self.database,
                 media_file=media_path,
@@ -143,9 +144,10 @@ class IndexWorker:
     def _index_streamed(self, job: dict, source: dict, resolved) -> dict | None:  # noqa: ANN001
         """Index straight off the wire, or return None to use the file path."""
         try:
-            with self.registry.client.stream_video(
-                resolved.media_url, max_bytes=self.max_video_bytes
-            ) as chunks:
+            stream_kwargs = {"max_bytes": self.max_video_bytes}
+            if resolved.request_headers:
+                stream_kwargs["headers"] = dict(resolved.request_headers)
+            with self.registry.client.stream_video(resolved.media_url, **stream_kwargs) as chunks:
                 return index_stream(
                     self.database,
                     chunks=chunks,

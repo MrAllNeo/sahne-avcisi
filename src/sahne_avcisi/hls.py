@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 from urllib.parse import unquote, urljoin, urlparse
 
 from .adapters import AdapterError, PublicHttpClient, UnsafeUrlError, validate_public_https_url
@@ -36,9 +37,16 @@ class HlsMirror:
         self.max_duration_seconds = max_duration_seconds
         self.target_height = target_height
 
-    def mirror(self, manifest_url: str, output_dir: Path, *, max_bytes: int) -> HlsMirrorResult:
+    def mirror(
+        self,
+        manifest_url: str,
+        output_dir: Path,
+        *,
+        max_bytes: int,
+        headers: Mapping[str, str] | None = None,
+    ) -> HlsMirrorResult:
         output_dir.mkdir(parents=True, exist_ok=True)
-        master_text, master_final = self.client.fetch_playlist(manifest_url)
+        master_text, master_final = self._fetch_playlist(manifest_url, headers)
         self._require_allowed_host(manifest_url, master_final)
         selected_url = master_final
         media_text = master_text
@@ -47,7 +55,7 @@ class HlsMirror:
         if variants:
             selected_url = self._select_variant(variants)["url"]
             self._require_allowed_host(master_final, selected_url)
-            media_text, media_final = self.client.fetch_playlist(selected_url)
+            media_text, media_final = self._fetch_playlist(selected_url, headers)
             self._require_allowed_host(master_final, media_final)
             selected_url = media_final
 
@@ -70,16 +78,21 @@ class HlsMirror:
             remaining = max_bytes - total_bytes
             if remaining <= 0:
                 raise AdapterError("HLS toplam indirme boyutu sınırı aşıldı.")
-            final_url, written = self.client.download_resource(
-                resource_url,
-                output_dir / local_name,
-                max_bytes=remaining,
-                allowed_content_prefixes=("video/", "audio/"),
-                allowed_content_types={
+            download_kwargs = {
+                "max_bytes": remaining,
+                "allowed_content_prefixes": ("video/", "audio/"),
+                "allowed_content_types": {
                     "application/octet-stream",
                     "binary/octet-stream",
                     "application/mp4",
                 },
+            }
+            if headers:
+                download_kwargs["headers"] = headers
+            final_url, written = self.client.download_resource(
+                resource_url,
+                output_dir / local_name,
+                **download_kwargs,
             )
             try:
                 self._require_allowed_host(selected_url, final_url)
@@ -99,6 +112,15 @@ class HlsMirror:
             total_bytes=total_bytes,
             duration_seconds=duration,
         )
+
+    def _fetch_playlist(
+        self,
+        url: str,
+        headers: Mapping[str, str] | None,
+    ) -> tuple[str, str]:
+        if headers:
+            return self.client.fetch_playlist(url, headers=headers)
+        return self.client.fetch_playlist(url)
 
     @staticmethod
     def _parse_variants(text: str, base_url: str) -> list[dict]:

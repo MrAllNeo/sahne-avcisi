@@ -110,9 +110,15 @@ class AdapterResult:
     indexable: bool
 ```
 
-Genel adaptör doğrudan video, Open Graph video ve HTML5 `video/source` elemanlarını indeksleyebilir. Açık HLS VOD manifestleri güvenli yerel aynaya alınarak indekslenir; iframe oynatıcılar yalnızca tespit edilir ve `blocked` durumuna alınır. Adaptör DRM, oturum, ödeme duvarı, CAPTCHA veya başka bir erişim kontrolünü aşmamalıdır.
+Genel adaptör doğrudan video, Open Graph video, HTML5 `video/source`, JSON-LD `VideoObject` ve script içinde düz metin olarak yayımlanan MP4/HLS adreslerini indeksleyebilir. İframe oynatıcılar en fazla iki kat ve her katta en fazla üç aday olacak biçimde takip edilir; her sayfa aynı HTTPS, DNS/özel-IP, yönlendirme ve boyut kontrollerinden geçer. Açık HLS VOD manifestleri güvenli yerel aynaya alınarak indekslenir. Adaptör DRM, oturum, ödeme duvarı, CAPTCHA veya başka bir erişim kontrolünü aşmamalıdır; bu işaretler bulunduğunda açık bir medya dizesi olsa bile sonuç `blocked` olur.
+
+Yetişkin kaynaklarında çıkarılan başlık yaş güvenliği filtresinden geçer. Reşit olmayanı veya yaşı belirsiz kişi/karakteri işaret eden terimler ve 18 altı yaş kalıpları kalıcı `blocked` sonucuna dönüşür. Bu filtre yalnızca ek savunmadır; operatörün kaynak ve içerik incelemesinin yerine geçmez.
 
 `rule34video` adaptörü yalnızca geçerli video sayfalarında HTML tarafından herkese açık sunulan `download=true` bağlantılarını toplar ve çözünürlük etiketine göre en yüksek seçeneği kullanır. Bu bağlantılar yoksa genel oynatıcıyı tersine mühendislik etmez; işi kalıcı olarak `blocked` sonucuna dönüştürür.
+
+`pornhub`, `xvideos` ve `xhamster` profilleri sayfaların herkese açık oynatıcı durumunu ortak aday modeline dönüştürür. Profiller kullanıcı cookie'si, hesap bilgisi, proxy veya tarayıcı otomasyonu kabul etmez. Medya sunucularının açık sayfa isteğiyle birlikte beklediği yalnızca `Referer`/`Origin` başlıkları izin listelidir; bu başlıklara satır sonu veya HTTPS dışı değer sokulamaz. xHamster'ın düz URL olmayan şifreli kaynak dizeleri aday sayılmaz.
+
+FMHY'den keşfedilen her site bu ortak motoru teknik olarak kullanabilir; ancak katalog keşfi kaynak etkinleştirme değildir. Telif, kullanım koşulları ve içerik güvenliği incelemesi tamamlanmayan siteler `review-required` veya `legal-review` durumunda kalır ve indeksleme işi kabul etmez.
 
 ### HLS güvenli aynası
 

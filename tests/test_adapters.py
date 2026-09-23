@@ -7,8 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sahne_avcisi.adapters import (
+    AdapterError,
     AdapterRegistry,
     AdapterResult,
+    PublicHttpClient,
     UnsupportedMediaError,
     UnsafeUrlError,
     validate_public_https_url,
@@ -38,12 +40,37 @@ RULE34VIDEO_SOURCE = {
 }
 
 
+def profiled_source(kind: str, base_url: str) -> dict:
+    return {
+        "id": kind,
+        "name": kind,
+        "base_url": base_url,
+        "kind": kind,
+        "category": "adult",
+        "adult": True,
+        "status": "active",
+    }
+
+
 class FakePageClient:
     def __init__(self, html: str):
         self.html = html
 
     def fetch_text(self, url: str):
         return self.html, url
+
+
+class MappingPageClient:
+    def __init__(self, pages: dict[str, str], json_documents: dict[str, str] | None = None):
+        self.pages = pages
+        self.json_documents = json_documents or {}
+
+    def fetch_text(self, url: str):
+        return self.pages[url], url
+
+    def fetch_json(self, url: str, *, headers=None):
+        del headers
+        return self.json_documents[url], url
 
 
 class FakeDownloadClient:
@@ -68,11 +95,32 @@ class FakeRegistry:
         return self.result
 
 
+class HeaderCaptureClient:
+    def __init__(self) -> None:
+        self.headers = None
+
+    @contextmanager
+    def stream_video(self, url: str, *, max_bytes: int, headers=None):
+        del url, max_bytes
+        self.headers = headers
+        yield iter([b"fake-video"])
+
+
 class AdapterTests(unittest.TestCase):
     def test_private_and_non_https_urls_are_rejected(self) -> None:
         for url in ("https://127.0.0.1/video.mp4", "https://10.1.2.3/video.mp4", "http://example.com/a"):
             with self.subTest(url=url), self.assertRaises(UnsafeUrlError):
                 validate_public_https_url(url)
+
+    def test_media_headers_are_strictly_allowlisted(self) -> None:
+        self.assertEqual(
+            PublicHttpClient._safe_request_headers({"Referer": "https://video.example.com/watch/1"}),
+            {"Referer": "https://video.example.com/watch/1"},
+        )
+        with self.assertRaises(AdapterError):
+            PublicHttpClient._safe_request_headers({"Cookie": "session=secret"})
+        with self.assertRaises(AdapterError):
+            PublicHttpClient._safe_request_headers({"Referer": "https://example.com/\r\nX-Test: 1"})
 
     def test_html5_video_and_title_are_resolved(self) -> None:
         html = """
@@ -94,6 +142,150 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(result.indexable)
         self.assertEqual(result.player_type, "hls")
         self.assertEqual(result.media_url, "https://cdn.example.com/a.m3u8")
+
+    def test_json_ld_content_url_is_resolved(self) -> None:
+        html = """
+        <script type="application/ld+json">
+          {"@type":"VideoObject","name":"Örnek","contentUrl":"https://cdn.example.com/film-720p.mp4"}
+        </script>
+        """
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(SOURCE, "https://video.example.com/watch/42")
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.media_url, "https://cdn.example.com/film-720p.mp4")
+
+    def test_public_iframe_chain_is_followed_with_a_depth_limit(self) -> None:
+        root = "https://video.example.com/watch/42"
+        embed = "https://player.example.net/embed/42"
+        pages = {
+            root: f'<title>Ana başlık</title><iframe src="{embed}"></iframe>',
+            embed: '<script>const file="https:\\/\\/cdn.example.net\\/film-1080p.mp4";</script>',
+        }
+        registry = AdapterRegistry(client=MappingPageClient(pages))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(SOURCE, root)
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.adapter, "iframe-public-media")
+        self.assertEqual(result.media_url, "https://cdn.example.net/film-1080p.mp4")
+        self.assertEqual(result.embed_url, embed)
+        self.assertEqual(result.title, "Ana başlık")
+
+    def test_access_control_blocks_even_when_a_media_literal_exists(self) -> None:
+        html = """
+        <div class="g-recaptcha"></div>
+        <script>const file="https://cdn.example.com/film.mp4";</script>
+        """
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(SOURCE, "https://video.example.com/watch/42")
+        self.assertFalse(result.indexable)
+        self.assertIn("CAPTCHA", result.reason or "")
+
+    def test_adult_source_title_with_uncertain_age_is_blocked(self) -> None:
+        html = """
+        <meta property="og:title" content="Teen example">
+        <video src="https://cdn.example.com/film.mp4"></video>
+        """
+        source = {**SOURCE, "adult": True, "category": "adult"}
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(source, "https://video.example.com/watch/42")
+        self.assertFalse(result.indexable)
+        self.assertIn("yaş güvenliği", result.reason or "")
+
+    def test_adult_iframe_title_with_uncertain_age_is_blocked(self) -> None:
+        root = "https://video.example.com/watch/42"
+        embed = "https://player.example.net/embed/42"
+        pages = {
+            root: f'<title>Ana başlık</title><iframe src="{embed}"></iframe>',
+            embed: '<title>Schoolgirl example</title><video src="https://cdn.example.net/film.mp4"></video>',
+        }
+        source = {**SOURCE, "adult": True, "category": "adult"}
+        registry = AdapterRegistry(client=MappingPageClient(pages))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(source, root)
+        self.assertFalse(result.indexable)
+        self.assertIn("yaş güvenliği", result.reason or "")
+
+    def test_xvideos_profile_prefers_public_high_quality_url(self) -> None:
+        html = """
+        <script>
+          html5player.setVideoTitle('Örnek Klip');
+          html5player.setVideoUrlLow('https://cdn.example.com/clip-240p.mp4');
+          html5player.setVideoHLS('https://cdn.example.com/master.m3u8');
+          html5player.setVideoUrlHigh('https://cdn.example.com/clip-720p.mp4');
+        </script>
+        """
+        source = profiled_source("xvideos", "https://www.xvideos.com/")
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(source, "https://www.xvideos.com/videoabc123/example")
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.adapter, "xvideos-public-page")
+        self.assertEqual(result.media_url, "https://cdn.example.com/clip-720p.mp4")
+        self.assertEqual(result.title, "Örnek Klip")
+        self.assertEqual(dict(result.request_headers)["Referer"], result.page_url)
+
+    def test_pornhub_profile_reads_public_media_definitions(self) -> None:
+        html = """
+        <script>var flashvars_42 = {
+          "video_title":"Örnek Klip",
+          "mediaDefinitions":[
+            {"quality":"480","videoUrl":"https://cdn.example.com/clip-480p.mp4"},
+            {"quality":"1080","videoUrl":"https://cdn.example.com/clip-1080p.mp4"}
+          ]
+        };</script>
+        """
+        source = profiled_source("pornhub", "https://www.pornhub.com/")
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(source, "https://www.pornhub.com/view_video.php?viewkey=abc123")
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.media_url, "https://cdn.example.com/clip-1080p.mp4")
+        self.assertEqual(result.title, "Örnek Klip")
+        self.assertEqual(dict(result.request_headers)["Origin"], "https://www.pornhub.com")
+
+    def test_pornhub_profile_resolves_public_json_media_endpoint(self) -> None:
+        page = "https://www.pornhub.com/view_video.php?viewkey=abc123"
+        endpoint = "https://www.pornhub.com/video/get_media?id=42"
+        html = f'<script>var flashvars_42 = {{"mediaDefinitions":[{{"videoUrl":"{endpoint}"}}]}};</script>'
+        documents = {endpoint: '[{"videoUrl":"https://cdn.example.com/clip-720p.mp4"}]'}
+        source = profiled_source("pornhub", "https://www.pornhub.com/")
+        registry = AdapterRegistry(client=MappingPageClient({page: html}, documents))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(source, page)
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.media_url, "https://cdn.example.com/clip-720p.mp4")
+
+    def test_xhamster_profile_reads_public_initial_state(self) -> None:
+        html = """
+        <script>window.initials = {
+          "videoModel":{"title":"Örnek Klip","sources":{"mp4":{"720p":"https://cdn.example.com/clip-720p.mp4"}}},
+          "xplayerSettings":{"sources":{"hls":{"url":"https://cdn.example.com/master.m3u8"}}}
+        };</script>
+        """
+        source = profiled_source("xhamster", "https://xhamster.com/")
+        registry = AdapterRegistry(client=FakePageClient(html))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            result = registry.resolve(source, "https://xhamster.com/videos/example-abc123")
+        self.assertTrue(result.indexable)
+        self.assertEqual(result.media_url, "https://cdn.example.com/clip-720p.mp4")
+        self.assertEqual(result.title, "Örnek Klip")
+
+    def test_profiled_source_rejects_non_video_page(self) -> None:
+        source = profiled_source("xvideos", "https://www.xvideos.com/")
+        registry = AdapterRegistry(client=FakePageClient("<html></html>"))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            with self.assertRaises(UnsupportedMediaError):
+                registry.resolve(source, "https://www.xvideos.com/profiles/example")
+
+    def test_pornhub_profile_requires_a_video_key(self) -> None:
+        source = profiled_source("pornhub", "https://www.pornhub.com/")
+        registry = AdapterRegistry(client=FakePageClient("<html></html>"))
+        with patch("sahne_avcisi.adapters.validate_public_https_url", side_effect=lambda url: url):
+            with self.assertRaises(UnsupportedMediaError):
+                registry.resolve(source, "https://www.pornhub.com/view_video.php")
 
     def test_rule34video_uses_highest_quality_public_download_link(self) -> None:
         html = """
@@ -176,6 +368,46 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(stored["status"], "completed")
             self.assertEqual(stored["frame_count"], 12)
             self.assertEqual(stored["media_url"], "https://cdn.example.com/film.mp4")
+
+    def test_worker_forwards_only_adapter_media_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Database(Path(temp_dir) / "test.sqlite3")
+            database.upsert_source(SOURCE)
+            job = database.enqueue_index_job(
+                source_id=SOURCE["id"],
+                page_url="https://video.example.com/watch/42",
+            )
+            resolved = AdapterResult(
+                adapter="profiled-public-page",
+                page_url=job["page_url"],
+                title="Başlık",
+                media_url="https://cdn.example.com/film.mp4",
+                player_type="direct",
+                indexable=True,
+                request_headers=(("Referer", job["page_url"]),),
+            )
+            client = HeaderCaptureClient()
+            registry = FakeRegistry(resolved)
+            registry.client = client
+
+            def fake_index(db: Database, **kwargs):
+                media_id = db.create_media(
+                    source_id=kwargs["source_id"],
+                    title=kwargs["title"],
+                    source_url=kwargs["source_url"],
+                    category=kwargs["category"],
+                    adult=kwargs["adult"],
+                )
+                return {"media_id": media_id, "frames": 3, "duration_ms": 1000}
+
+            with patch(
+                "sahne_avcisi.worker.index_stream",
+                side_effect=fake_index,
+            ):
+                result = IndexWorker(database, registry=registry).run_once()
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(client.headers, {"Referer": job["page_url"]})
 
 
 if __name__ == "__main__":

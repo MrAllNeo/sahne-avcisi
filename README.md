@@ -4,7 +4,7 @@
 
 Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMHY ana katalog olarak izlenir, keşfedilen siteler inceleme kuyruğuna alınır ve yalnızca teknik, hukuki ve güvenlik kontrollerinden geçen kaynaklar sahne indeksleyicisine bağlanır.
 
-> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. İsteğe bağlı trace.moe aramasıyla normal ve 18+ anime sonuçlarını bölüm/zaman koduyla birleştirir. FMHY katalog takibi, güvenli kaynak kuyruğu, HTML5/doğrudan video ve açık HLS VOD adaptörleri çalışır.
+> Durum: Erken çalışan MVP. Yerel ve izinli videoları indeksleyip yüklenen ekran görüntülerini dHash + aHash ile arayabilir. İsteğe bağlı trace.moe aramasıyla normal ve 18+ anime sonuçlarını bölüm/zaman koduyla birleştirir. FMHY katalog takibi, güvenli kaynak kuyruğu, HTML5/JSON-LD/script/doğrudan video, iki kademeli iframe ve açık HLS VOD adaptörleri çalışır.
 
 ## İlk sürümde çalışanlar
 
@@ -19,7 +19,9 @@ Projenin kaynak keşif yaklaşımı **FMHY-first** olarak tasarlanmıştır: FMH
 - Yeni, güncellenen, kaybolan ve geri dönen kaynak geçmişi
 - Kaynak adaptörü geliştirme kuyruğu
 - HTML5 video, Open Graph video, Video.js, JWPlayer, Plyr, HLS ve iframe oynatıcı tespiti
+- JSON-LD `VideoObject`, açık script MP4/HLS tanımları ve en fazla iki kademeli güvenli iframe çözümleme
 - Rule34Video video sayfalarında herkese açık sunulan doğrudan indirme bağlantılarını çözme
+- Pornhub, XVideos ve xHamster açık video sayfası profilleri; yalnızca düz HTTPS MP4/HLS tanımları
 - Yalnızca etkinleştirilmiş kaynaklar için kalıcı indeksleme iş kuyruğu
 - Videoyu diske yazmadan doğrudan akıştan indeksleme; boru üzerinden okunamayan kapsayıcılar için boyut sınırlı indirmeye geri düşüş
 - Açık, şifresiz ve tamamlanmış HLS VOD manifestlerini güvenli yerel aynaya alma
@@ -215,6 +217,26 @@ Worker doğrudan MP4/WebM/MOV/M4V adreslerini, HTML sayfasındaki standart video
 
 Rule34Video adaptörü yalnızca `/video/<id>` ve `/videos/<id>` sayfalarında HTML içinde herkese açık olarak sunulan `download=true` bağlantılarını kullanır ve mevcut seçenekler arasından en yüksek çözünürlüğü seçer. Doğrudan bağlantı yoksa iş `blocked` olur; CAPTCHA, DRM, oturum açma veya başka erişim kontrolleri aşılmaz.
 
+Pornhub, XVideos ve xHamster profilleri yalnızca video sayfasının açık HTML/JSON durumunda yayımlanan düz HTTPS MP4/HLS adreslerini çözer. Medya sunucusunun beklediği `Referer` ve gerektiğinde `Origin` başlıkları adaptör sonucunda taşınır; cookie, kullanıcı hesabı, proxy veya tarayıcı oturumu aktarılmaz. xHamster'ın şifreli/obfuske kaynak dizeleri çözülmez.
+
+Ortak adaptör, izin verilmiş her kaynakta sırasıyla Open Graph/HTML5, JSON-LD, script içindeki açık medya adresleri ve en fazla iki iframe katmanını dener. Her ağ isteği aynı HTTPS, özel-IP/SSRF, yönlendirme ve boyut kontrollerinden geçer. Sayfada CAPTCHA, Widevine/PlayReady/FairPlay, kilitli oynatıcı veya oturum zorunluluğu görülürse medya adresi bulunsa bile iş `blocked` olur. Yetişkin kaynaklarında başlık reşit olmayan veya yaşı belirsiz kişi/karakter çağrışımı taşıyorsa içerik ayrıca indekslenmez.
+
+### Kaynak destek matrisi
+
+| Kaynak | Durum | Kapsam |
+|---|---|---|
+| FMHY / FMHY Wiki | Aktif katalog | Kaynak keşfi; yeni siteler otomatik etkinleşmez |
+| Archive.org | Aktif | Lisansı açıkça kamu malı/CC olan videolar |
+| trace.moe | Aktif API | Kullanıcı onaylı anime sahne sorgusu |
+| Rule34Video | Aktif | Herkese açık `download=true` bağlantıları |
+| Pornhub | Aktif | Açık video sayfasındaki MP4/HLS tanımları |
+| XVideos | Aktif | Açık video/embed sayfasındaki MP4/HLS tanımları |
+| xHamster | Aktif | Düz HTTPS olarak yayımlanan MP4/HLS tanımları |
+| Embedy / Biqle | İnceleme | Ortak iframe motoru hazır; kaynak/koşul onayı bekliyor |
+| Hanime / HentaiHeaven / HentaiCity / HDFilmCehennemi | Hukuki inceleme | Kaynağa özel indeksleme etkin değil |
+| Rule34Gen | İnceleme | Video yapısı ve içerik güvenliği doğrulanmadı |
+| JustWatch | Metadata | Video kaynağı değil; yayın seçeneği/metadata adayı |
+
 HLS sınırları worker seçenekleriyle ayarlanabilir:
 
 ```bash
@@ -243,8 +265,8 @@ Worker her başlangıçta `--stale-minutes` süresinden uzun süredir `running` 
 1. OpenCLIP/SigLIP embedding ve pgvector/Qdrant araması
 2. Altyazı, filigran ve oynatıcı arayüzü maskeleme
 3. JustWatch/TMDB metadata zenginleştirme
-4. Ortak iframe oynatıcı ve kaynağa özel adaptörler
-5. Kaynak sağlık kontrolleri ve takılı iş kurtarma
+4. Kaynak sağlık kontrolleri ve otomatik adaptör regresyon uyarıları
+5. İncelemeden geçen yeni FMHY kaynakları için site profilleri
 6. Aynı videonun farklı kaynaklardaki kopyalarını birleştirme
 
 Detaylı tasarım için [ARCHITECTURE.md](ARCHITECTURE.md) dosyasına bakın.

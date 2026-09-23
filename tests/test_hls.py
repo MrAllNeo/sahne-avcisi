@@ -27,8 +27,10 @@ class FakeHlsClient:
         self.playlists = playlists
         self.resources = resources
         self.downloads: list[str] = []
+        self.request_headers: list[dict | None] = []
 
-    def fetch_playlist(self, url: str):
+    def fetch_playlist(self, url: str, *, headers=None):
+        self.request_headers.append(headers)
         return self.playlists[url], url
 
     def download_resource(
@@ -39,8 +41,10 @@ class FakeHlsClient:
         max_bytes: int,
         allowed_content_prefixes: tuple[str, ...],
         allowed_content_types: set[str],
+        headers=None,
     ):
         del allowed_content_prefixes, allowed_content_types
+        self.request_headers.append(headers)
         payload = self.resources[url]
         if len(payload) > max_bytes:
             raise AdapterError("Kaynak izin verilen boyut sınırını aşıyor.")
@@ -128,6 +132,25 @@ part-2.m4s
                 client = FakeHlsClient({url: playlist}, {})
                 with self.assertRaises(error_type):
                     HlsMirror(client).mirror(url, Path(temp_dir), max_bytes=100)
+
+    def test_media_headers_are_forwarded_to_manifest_and_segments(self) -> None:
+        playlist_url = "https://video.example.com/vod/index.m3u8"
+        segment_url = "https://video.example.com/vod/part.ts"
+        client = FakeHlsClient(
+            {playlist_url: "#EXTM3U\n#EXTINF:2,\npart.ts\n#EXT-X-ENDLIST\n"},
+            {segment_url: b"segment"},
+        )
+        headers = {"Referer": "https://video.example.com/watch/1"}
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "sahne_avcisi.hls.validate_public_https_url", side_effect=lambda url: url
+        ):
+            HlsMirror(client).mirror(
+                playlist_url,
+                Path(temp_dir),
+                max_bytes=100,
+                headers=headers,
+            )
+        self.assertEqual(client.request_headers, [headers, headers])
 
     def test_worker_completes_an_hls_job_from_local_mirror(self) -> None:
         playlist_url = "https://video.example.com/vod/index.m3u8"

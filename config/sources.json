@@ -50,9 +50,9 @@
     "kind": "video-site",
     "category": "adult-animation",
     "adult": true,
-    "status": "adapter-required",
+    "status": "legal-review",
     "priority": 88,
-    "notes": "Yalnızca herkese açık ve izin verilen önizleme/akışlar"
+    "notes": "Kaynağa özel destek eklenmedi; açık kaynak extractor talebi telif/piracy gerekçesiyle reddedilmiş"
   },
   {
     "id": "rule34video",
@@ -69,34 +69,34 @@
     "id": "pornhub",
     "name": "Pornhub",
     "base_url": "https://www.pornhub.com/",
-    "kind": "video-site",
+    "kind": "pornhub",
     "category": "adult",
     "adult": true,
-    "status": "adapter-required",
+    "status": "active",
     "priority": 82,
-    "notes": "Yalnızca herkese açık, yasal ve izin verilen içerik"
+    "notes": "Yalnızca açık video sayfalarındaki MP4/HLS tanımları; üyelik, CAPTCHA ve DRM desteklenmez"
   },
   {
     "id": "xvideos",
     "name": "XVideos",
     "base_url": "https://www.xvideos.com/",
-    "kind": "video-site",
+    "kind": "xvideos",
     "category": "adult",
     "adult": true,
-    "status": "adapter-required",
+    "status": "active",
     "priority": 81,
-    "notes": "Yalnızca herkese açık, yasal ve izin verilen içerik"
+    "notes": "Yalnızca açık video/embed sayfalarındaki MP4/HLS tanımları"
   },
   {
     "id": "xhamster",
     "name": "xHamster",
     "base_url": "https://xhamster.com/",
-    "kind": "video-site",
+    "kind": "xhamster",
     "category": "adult",
     "adult": true,
-    "status": "adapter-required",
+    "status": "active",
     "priority": 80,
-    "notes": "Yalnızca herkese açık, yasal ve izin verilen içerik"
+    "notes": "Yalnızca açık video sayfasında düz HTTPS olarak yayımlanan MP4/HLS tanımları; şifreli/obfuske akışlar çözülmez"
   },
   {
     "id": "hentaiheaven",
@@ -105,9 +105,9 @@
     "kind": "video-site",
     "category": "adult-animation",
     "adult": true,
-    "status": "review-required",
+    "status": "legal-review",
     "priority": 75,
-    "notes": "Teknik ve kullanım koşulları incelemesi gerekli"
+    "notes": "Kaynağa özel indeksleme eklenmedi; telif, teknik yapı ve kullanım koşulları incelemesi gerekli"
   },
   {
     "id": "hentaicity",
@@ -116,9 +116,9 @@
     "kind": "unknown",
     "category": "adult-animation",
     "adult": true,
-    "status": "review-required",
+    "status": "legal-review",
     "priority": 70,
-    "notes": "Video/galeri yapısı incelenecek"
+    "notes": "Kaynağa özel indeksleme eklenmedi; video/galeri yapısı ve kullanım hakları incelenecek"
   },
   {
     "id": "rule34gen",
@@ -140,7 +140,7 @@
     "adult": true,
     "status": "review-required",
     "priority": 65,
-    "notes": "Gömülü oynatıcı sağlayıcısı olarak incelenecek"
+    "notes": "Ortak iki kademeli iframe çözücü teknik olarak hazır; etkinleştirme için kaynak ve kullanım koşulları incelemesi gerekli"
   },
   {
     "id": "biqle",
@@ -151,7 +151,7 @@
     "adult": true,
     "status": "review-required",
     "priority": 64,
-    "notes": "Toplayıcı ve gömülü kaynak yapısı incelenecek"
+    "notes": "Ortak iframe/JSON-LD çözücü teknik olarak hazır; toplayıcı kaynak ve kullanım koşulları incelemesi gerekli"
   },
   {
     "id": "justwatch",
